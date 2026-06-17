@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# Generated results and figures
+results/
+*.bak
+*.dir
+
+# Third-party data (GasLib networks, TRR154 transient data) and docs
+# (reference papers + design notes); keep local, do not commit
+data/
+docs/
+
+# OS
+.DS_Store
