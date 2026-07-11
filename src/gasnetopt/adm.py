@@ -99,6 +99,14 @@ def miocp_adm(ocp_model, tau_min=0.01, with_CIAP=True, online_plot=None,
     '''Penalty ADM for mixed-integer optimal control problems with additional
     combinatorial constraints that couple over time.
 
+    The POC relaxation is solved once up front; its solution initializes the
+    combinatorial reference v_ref (tCOMB projection of the rounded schedule)
+    and, if rho_values is None, scales the penalty schedule: the homotopy
+    brackets the critical weight rho_crit = Psi_POC / (T * nv_ref) at which
+    the L1 coupling penalty becomes comparable to the objective. A fixed
+    schedule (the paper uses logspace(-3, 6)) can otherwise start with the
+    penalty already dominant, locking the iteration onto the initial v_ref.
+
     Returns (y, u, beta, v_ref, nodes, obj_val, w, timings).'''
 
     nlp_solver_name = 'ipopt'
@@ -108,16 +116,33 @@ def miocp_adm(ocp_model, tau_min=0.01, with_CIAP=True, online_plot=None,
 
     timings = {'poc_nlp': 0.0, 'reopt_nlp': 0.0, 'comb': 0.0, 'sur': 0.0}
 
+    tcomb = TComb(ocp_model.t, ocp_model.nalpha, tau_min,
+                  backend=milp_backend)
+
+    # solve the POC relaxation (rho = 0) once
     w0 = np.array(ocp_model.w0, dtype=float).copy()
+    p = np.concatenate(([0.], v_ref.flatten()))
+    sol = solver(x0=w0, p=p, lbx=ocp_model.lbw, ubx=ocp_model.ubw,
+                 lbg=ocp_model.lbg, ubg=ocp_model.ubg)
+    if nlp_solver_name == 'ipopt':
+        ret = solver.stats()['return_status']
+        solved = ['Solve_Succeeded', 'Solved_To_Acceptable_Level']
+        assert ret in solved, 'Solution of POC relaxation failed'
+    w0 = sol['x'].full().flatten()
     y, u, alpha, v, nodes = ocp_model.extract(w0)
+    timings['poc_nlp'] += _nlp_wall_time(solver)
+    Psi_poc = ocp_model.evaluate_objective(0., v_ref, w0)
+
     if with_CIAP:
         beta, wall_t = solve_ciap(ocp_model.t, alpha, strategy='SUR')
         timings['sur'] += wall_t
     else:
         beta = alpha
 
-    tcomb = TComb(ocp_model.t, ocp_model.nalpha, tau_min,
-                  backend=milp_backend)
+    # data-driven initial combinatorial reference: dwell-feasible projection
+    # of the POC schedule instead of the arbitrary constant configuration
+    v_ref, _, wall_t = tcomb.solve(beta.dot(ocp_model.r), ocp_model.r)
+    timings['comb'] += wall_t
 
     out_hdr = '{:>9} {:>9} {:>10} {:>11} {:>9} {:>9}'
     output = '{:9.2e} {:9.2e} {:>10s} {:>11s} {:>9s} {:>9s}'
@@ -125,7 +150,9 @@ def miocp_adm(ocp_model, tau_min=0.01, with_CIAP=True, online_plot=None,
                          'L1 pen', 'termcond'))
 
     if rho_values is None:
-        rho_values = np.logspace(-3, 6, num=10)
+        t_span = ocp_model.t[-1] - ocp_model.t[0]
+        rho_crit = max(abs(Psi_poc), 1e-8) / (t_span * ocp_model.nv_ref)
+        rho_values = rho_crit * np.logspace(-3, 6, num=10)
 
     # penalty loop
     for rho in rho_values:
