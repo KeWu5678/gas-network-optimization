@@ -8,6 +8,12 @@ from gasnetopt.gas.model import switch_encoding
 from gasnetopt.gas.ocmodel import GasOCModel
 
 G11 = DATA_DIR / 'gaslib' / 'GasLib-11'
+G40 = DATA_DIR / 'gaslib' / 'GasLib-40'
+
+# GasLib data is not redistributed with the repository (see README);
+# skip the gas tests when it has not been placed under data/gaslib.
+pytestmark = pytest.mark.skipif(
+    not G11.exists(), reason='GasLib data not available under data/gaslib')
 
 
 @pytest.fixture(scope='module')
@@ -45,9 +51,10 @@ def test_parse_bcd_gaslib11(bc):
 
 
 def test_parse_state_gaslib40():
-    st = gaslib_io.parse_state(
-        DATA_DIR / 'gaslib' / 'GasLib-40' /
-        'GasLib-40-sinus_5000_60-initial.state')
+    state_file = G40 / 'GasLib-40-sinus_5000_60-initial.state'
+    if not state_file.exists():
+        pytest.skip('GasLib-40 state data not available')
+    st = gaslib_io.parse_state(state_file)
     assert len(st.pipe_profiles) == 39
     xs, qs, ps = st.pipe_profiles['pipe_1']
     assert xs[0] == 0. and len(xs) == len(qs) == len(ps)

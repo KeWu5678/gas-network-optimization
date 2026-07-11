@@ -6,10 +6,14 @@ from gasnetopt.ciap import solve_ciap, sum_up_rounding
 
 
 def accumulated_deviation(t, alpha, beta):
-    'eta(beta) = max_{i,k} |sum_{k''<k} dt (alpha - beta)|'
+    '''eta(beta) = min_delta max_{i,k} |delta + sum_{k''<k} dt (alpha-beta)|,
+    the centered deviation the CIAP MILP minimizes (free offset delta shared
+    over all modes; k = 0 contributes an empty sum, i.e. 0).'''
     dt = np.diff(t)[:, None]
     acc = np.cumsum(dt * (alpha - beta), axis=0)
-    return np.abs(acc).max()
+    lo = min(acc.min(), 0.)
+    hi = max(acc.max(), 0.)
+    return (hi - lo) / 2.
 
 
 @pytest.fixture

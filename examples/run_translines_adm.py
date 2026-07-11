@@ -47,7 +47,7 @@ def main():
     results_io.update_results(
         out_file, net_name=args.net, net=ocp_model.net(),
         demand=ocp_model.demand, T=ocp_model.T, tau_min=tau_min,
-        nt=ocp_model.nt, nx=ocp_model.nx)
+        nt=ocp_model.nt, nx=ocp_model.nx, r=ocp_model.r)
 
     timings = {'poc_nlp': 0.0, 'reopt_nlp': 0.0, 'comb': 0.0, 'sur': 0.0}
     solver = ocp_model.create_NLP_solver(tol=1e-8)

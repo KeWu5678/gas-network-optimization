@@ -42,7 +42,9 @@ def main():
     def net():
         return net_data
 
-    r = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
+    # mode encoding from the model that produced the results (fallback for
+    # pickles written before it was stored)
+    r = db.get('r', np.array([[0, 0], [0, 1], [1, 0], [1, 1]]))
 
     def step_fmt(v):
         return np.concatenate((v.flatten(), [np.nan]))

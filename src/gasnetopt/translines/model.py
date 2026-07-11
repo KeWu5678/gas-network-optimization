@@ -16,7 +16,6 @@ from scipy.sparse import dok_matrix
 import matplotlib.pyplot as plt
 
 from .. import DATA_DIR, collocation
-from ..collocation import pairwise
 from . import networks
 from .networks import in_edges, out_edges
 
@@ -184,7 +183,13 @@ def extract_solution(sol, net, nt, nx):
 def load_demand(name, data_dir=None):
     'Load a demand file (e.g. "demand_extended_tree_coarse.dat").'
     data_dir = DATA_DIR / 'translines' if data_dir is None else data_dir
-    return np.loadtxt(data_dir / name)
+    path = data_dir / name
+    if not path.exists():
+        raise FileNotFoundError(
+            'Demand file {} not found. Only the extended-tree demand data '
+            'ships with the repository; for other networks provide the file '
+            'yourself (rows = consumers, columns = time steps).'.format(path))
+    return np.loadtxt(path)
 
 
 def plot_solution(net, u, alpha, xi_p, xi_m, demand, T, nt):
@@ -300,26 +305,7 @@ class TranslinesOCModel(collocation.OCModel):
         assert self.n_confg == self.nalpha, 'Implement case nalpha != 4'
 
         # augment problem with outer-convexified L1 penalization term
-        rho = cas.MX.sym('rho')
-        V_ref = cas.MX.sym('V_ref', self.nv_ref, nt - 1)
-        self.nlp['p'] = cas.vertcat(rho, cas.vec(V_ref))
-        alpha = cas.reshape(self.nlp['x'][:(nt - 1) * self.n_confg],
-                            nt - 1, self.n_confg)
-        pen_L1 = 0
-        for k, (tk, tkp1) in enumerate(pairwise(self.t)):
-            integrand = 0
-            for i in range(self.nalpha):
-                for j in range(self.nv_ref):
-                    # explicit cases for signs in absolute value function
-                    if self.r[i, j] == 0:  # -> |x| = +x >= 0
-                        integrand += V_ref[j, k] * alpha[k, i]
-                    elif self.r[i, j] == 1:  # -> |x| = -x >= 0
-                        integrand += (1 - V_ref[j, k]) * alpha[k, i]
-                    else:
-                        raise Exception('Array r not binary')
-            pen_L1 = pen_L1 + (tkp1 - tk) * integrand
-        obj_sca = 1e-3
-        self.nlp['f'] = obj_sca * self.nlp['f'] + rho * pen_L1
+        self.add_l1_penalty(obj_sca=1e-3)
 
     def extract(self, w):
         'Extract and return (y, u, alpha, v, nodes) from NLP variable w.'

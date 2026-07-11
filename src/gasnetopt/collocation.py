@@ -257,10 +257,40 @@ class OCModel:
             options['opttol'] = tol 
         return cas.nlpsol('solver', nlp_solver_name, self.nlp, options)
 
+    def add_l1_penalty(self, obj_sca=1.):
+        '''Augment the NLP objective with the outer-convexified L1 coupling
+        penalty rho * sum_k h_k sum_i alpha_{k,i} sum_j |r_{i,j} - V_ref_{j,k}|
+        of the penalty ADM, parametric in (rho, V_ref). Assumes alpha (shape
+        (nt-1, nalpha)) is stored first in nlp['x'] and r is binary. The
+        original objective is scaled by obj_sca.'''
+        nt = len(self.t)
+        rho = cas.MX.sym('rho')
+        V_ref = cas.MX.sym('V_ref', self.nv_ref, nt - 1)
+        self.nlp['p'] = cas.vertcat(rho, cas.vec(V_ref))
+        alpha = cas.reshape(self.nlp['x'][:(nt - 1) * self.nalpha],
+                            nt - 1, self.nalpha)
+        pen_L1 = 0
+        for k, (tk, tkp1) in enumerate(pairwise(self.t)):
+            integrand = 0
+            for i in range(self.nalpha):
+                for j in range(self.nv_ref):
+                    # explicit cases for signs in absolute value function
+                    if self.r[i, j] == 0:  # -> |x| = +x >= 0
+                        integrand += V_ref[j, k] * alpha[k, i]
+                    elif self.r[i, j] == 1:  # -> |x| = -x >= 0
+                        integrand += (1 - V_ref[j, k]) * alpha[k, i]
+                    else:
+                        raise Exception('Array r not binary')
+            pen_L1 = pen_L1 + (tkp1 - tk) * integrand
+        self.nlp['f'] = obj_sca * self.nlp['f'] + rho * pen_L1
+        self._f_obj = None
+
     def evaluate_objective(self, rho, v_ref, w):
         '''Evaluate objective with L1 penalization term.'''
-        f_obj = cas.Function('obj',
-                [self.nlp['x'], self.nlp['p']], [self.nlp['f']])
+        f_obj = getattr(self, '_f_obj', None)
+        if f_obj is None:
+            f_obj = self._f_obj = cas.Function(
+                'obj', [self.nlp['x'], self.nlp['p']], [self.nlp['f']])
         p = np.concatenate(([rho], v_ref.flatten()))
         return float(f_obj(w, p))
 

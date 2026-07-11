@@ -24,11 +24,16 @@ def sum_up_rounding(t, alpha):
     assert N1 == len(t) - 1
     p = np.zeros((N1, modes))
     phat = np.zeros(modes)
+    unique = True
     for i in range(N1):
         phat += dt[i] * alpha[i, :]
         j = np.argmax(phat)
+        if np.sum(phat == phat[j]) > 1:
+            unique = False
         p[i, j] = 1.
         phat[j] -= dt[i]
+    if not unique:
+        print('Warning: Sum-Up Rounding result not unique')
     return p
 
 

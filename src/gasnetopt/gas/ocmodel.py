@@ -11,7 +11,6 @@ import casadi as cas
 import numpy as np
 
 from .. import collocation
-from ..collocation import pairwise
 from .model import build_gas_nlp
 
 
@@ -47,23 +46,7 @@ class GasOCModel(collocation.OCModel):
         self.nw = pos
 
         # augment with the outer-convexified L1 penalization term
-        nt = self.nt
-        rho = cas.MX.sym('rho')
-        V_ref = cas.MX.sym('V_ref', self.nv_ref, nt - 1)
-        self.nlp['p'] = cas.vertcat(rho, cas.vec(V_ref))
-        alpha = cas.reshape(self.nlp['x'][:(nt - 1) * self.n_confg],
-                            nt - 1, self.n_confg)
-        pen_L1 = 0
-        for k, (tk, tkp1) in enumerate(pairwise(self.t)):
-            integrand = 0
-            for i in range(self.nalpha):
-                for j in range(self.nv_ref):
-                    if self.r[i, j] == 0:
-                        integrand += V_ref[j, k] * alpha[k, i]
-                    else:
-                        integrand += (1 - V_ref[j, k]) * alpha[k, i]
-            pen_L1 = pen_L1 + (tkp1 - tk) * integrand
-        self.nlp['f'] = self.nlp['f'] + rho * pen_L1
+        self.add_l1_penalty()
 
     def var(self, w, name):
         'Extract variable `name` from NLP vector w as a 2D array.'

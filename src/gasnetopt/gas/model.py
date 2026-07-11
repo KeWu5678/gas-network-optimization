@@ -305,13 +305,25 @@ def build_gas_nlp(net, bc, T=7200., nt=121, nx=2, p_ref=50e5,
         cols = [alpha[:, conf] for conf in range(n_confg) if r[conf, j]]
         return sum(cols) if cols else cas.DM.zeros(nt - 1)
 
-    rho_span = (max(n.pressure_max for n in net.nodes.values())
-                - min(n.pressure_min for n in net.nodes.values())) / p_ref
+    def require_finite(val, what):
+        '''Big-M constants multiply the relaxed switch state; an infinite
+        value (missing bound in the .net file) would evaluate to 0*inf = NaN
+        inside the NLP, so fail early with a clear message.'''
+        if not np.isfinite(val):
+            raise ValueError('{} must be finite (missing bound in the .net '
+                             'file?)'.format(what))
+        return val
+
+    rho_span = require_finite(
+        (max(n.pressure_max for n in net.nodes.values())
+         - min(n.pressure_min for n in net.nodes.values())) / p_ref,
+        'network pressure span (node pressureMin/pressureMax)')
 
     for j, valve in enumerate(net.valves):
         wv = switch_state(j)
         qv = q_valve[valve.id]
-        qb = valve.flow_max / sca.Q_ref
+        qb = require_finite(valve.flow_max / sca.Q_ref,
+                            'flowMax of valve {}'.format(valve.id))
         dpb = min(valve.pressure_diff_max / p_ref, rho_span)
         dp = node_pressure(valve.from_node) - node_pressure(valve.to_node)
         add_le(qv - wv * qb)                 # |q_V| <= w q_max
@@ -321,7 +333,9 @@ def build_gas_nlp(net, bc, T=7200., nt=121, nx=2, p_ref=50e5,
 
     for j, comp in enumerate(net.compressors, start=len(net.valves)):
         wc = switch_state(j)
-        dp_max = (comp.pressure_out_max - comp.pressure_in_min) / p_ref
+        dp_max = require_finite(
+            (comp.pressure_out_max - comp.pressure_in_min) / p_ref,
+            'pressureOutMax of compressor {}'.format(comp.id))
         add_eq(node_pressure(comp.to_node) - node_pressure(comp.from_node)
                - dp_comp[comp.id])           # p_out = p_in + dp
         add_le(dp_comp[comp.id] - wc * dp_max)   # dp <= w dp_max
@@ -362,7 +376,12 @@ def build_gas_nlp(net, bc, T=7200., nt=121, nx=2, p_ref=50e5,
             delivered[node.id] = inflow
             d_refs[node.id] = bc.demand(node.id, t_sec[:-1]) / sca.Q_ref
 
-    d_scale = max(d.max() for d in d_refs.values())
+    if not d_refs:
+        raise ValueError('Network has no sink nodes; the objective tracks '
+                         'sink deliveries against the .bcd demand.')
+    # guard against identically zero demand (objective is scale-invariant
+    # only up to this normalization)
+    d_scale = max(d.max() for d in d_refs.values()) or 1.
     for sink_id, d_ref in d_refs.items():
         mis = (delivered[sink_id] - cas.DM(d_ref)) / d_scale
         J = J + 0.5 * dt * cas.dot(mis, mis)
