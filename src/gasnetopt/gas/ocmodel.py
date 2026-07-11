@@ -7,10 +7,13 @@ outer-convexified L1 coupling penalty rho * sum_k h_k sum_i alpha_{k,i}
 sum_j |r_{i,j} - V_ref_{j,k}|, parametric in (rho, V_ref).
 '''
 
+from __future__ import annotations
+
 import casadi as cas
 import numpy as np
 
 from .. import collocation
+from . import gaslib_io
 from .model import build_gas_nlp
 
 
@@ -18,7 +21,8 @@ class GasOCModel(collocation.OCModel):
     '''Gas network optimal control model with POC of valve/compressor
     switching (see gas.model.build_gas_nlp for the discretization).'''
 
-    def __init__(self, net, bc, **kwargs):
+    def __init__(self, net: gaslib_io.GasNetwork,
+                 bc: gaslib_io.BoundaryConditions, **kwargs) -> None:
         self.net = net
         self.bc = bc
         d = build_gas_nlp(net, bc, **kwargs)
@@ -48,19 +52,20 @@ class GasOCModel(collocation.OCModel):
         # augment with the outer-convexified L1 penalization term
         self.add_l1_penalty()
 
-    def var(self, w, name):
+    def var(self, w: np.ndarray, name: str) -> np.ndarray:
         'Extract variable `name` from NLP vector w as a 2D array.'
         pos, rows, cols = self.offsets[name]
         return np.reshape(w[pos:pos + rows * cols], (rows, cols), order='F')
 
-    def extract(self, w):
+    def extract(self, w: np.ndarray) -> tuple:
         'Extract and return (y, u, alpha, v, nodes) from NLP variable w.'
         alpha = self.var(w, 'alpha')
         u = self.var(w, 'u')
         y = w[(self.nt - 1) * (self.n_confg + self.n_src):]
         return y, u, alpha, None, None
 
-    def overwrite(self, w, y=None, u=None, alpha=None, v=None, nodes=None):
+    def overwrite(self, w: np.ndarray, y=None, u=None, alpha=None,
+                  v=None, nodes=None) -> np.ndarray:
         'Overwrite given components in NLP variable w. Returns w.'
         if v is not None or nodes is not None:
             raise Exception('Cannot overwrite unknown variables')
@@ -75,7 +80,7 @@ class GasOCModel(collocation.OCModel):
             w[pos:] = y
         return w
 
-    def solution_dict(self, w):
+    def solution_dict(self, w: np.ndarray) -> dict:
         '''Physical-unit solution arrays: pressures [bar], mass flows [kg/s],
         switch states, deliveries and demands per sink.'''
         d = self.data

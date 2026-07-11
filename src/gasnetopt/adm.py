@@ -18,9 +18,13 @@ The OCP is accessed through the OCModel interface (collocation.OCModel):
 extract/overwrite/evaluate_objective, time grid t, mode encoding r.
 '''
 
+from __future__ import annotations
+
+import time
+
 import numpy as np
 
-from .ciap import solve_ciap, _min_up_constraints
+from .ciap import _min_up_constraints, solve_ciap
 from .milp import MilpModel
 
 
@@ -53,7 +57,7 @@ def resolve_with_fixed_controls(ocp_model, solver, w0, p,
     return y, u, alpha, v, nodes, w, wall_time
 
 
-def _nlp_wall_time(solver):
+def _nlp_wall_time(solver) -> float:
     stats = solver.stats()
     return sum(val for key, val in stats.items() if 't_wall' in key)
 
@@ -63,7 +67,8 @@ class TComb:
     controls v onto the set of mode realizations r satisfying min-up (dwell
     time) constraints tau_min, in the weighted L1 distance.'''
 
-    def __init__(self, t, modes, tau_min, backend=None):
+    def __init__(self, t: np.ndarray, modes: int, tau_min: float,
+                 backend: str | None = None) -> None:
         N = len(t)
         m = MilpModel('tCOMB')
         x = m.add_vars((N - 1, modes), binary=True)
@@ -79,23 +84,34 @@ class TComb:
         self.t = t
         self.backend = backend
 
-    def solve(self, v, r):
+    def solve(self, v: np.ndarray, r: np.ndarray,
+              time_limit: float | None = None
+              ) -> tuple[np.ndarray, float, float]:
         'Solve for given realized controls v, mode encodings r (modes x nv).'
         N, t, x = self.N, self.t, self.x
-        cost = np.zeros((N - 1, self.modes))
-        for i in range(self.modes):
-            for k in range(N - 1):
-                hk = t[k + 1] - t[k]
-                cost[k, i] = hk * np.linalg.norm(v[k, :] - r[i, :], 1)
+        hk = np.diff(t)[:, None]
+        cost = hk * np.abs(v[:, None, :] - r[None, :, :]).sum(axis=2)
         self.model.set_objective(x.reshape(-1), cost.reshape(-1))
-        sol, obj_val, wall_time = self.model.solve(backend=self.backend)
+        sol, obj_val, wall_time = self.model.solve(backend=self.backend,
+                                                   time_limit=time_limit)
         result = np.round(sol[x.reshape(-1)]).reshape(N - 1, self.modes)
         return result.dot(r), obj_val, wall_time
 
 
+def _config_multipliers(v_ref: np.ndarray, r: np.ndarray) -> np.ndarray:
+    '''Convert a switch-state schedule v_ref (N-1, nv) into binary
+    configuration multipliers beta (N-1, modes) with beta[k, i] = 1 iff
+    r[i, :] == v_ref[k, :]. The encoding r enumerates all configurations,
+    so the match always exists.'''
+    matches = np.all(v_ref[:, None, :] == r[None, :, :], axis=2)
+    assert np.all(matches.sum(axis=1) == 1), \
+        'v_ref contains a switch state not present in the encoding r'
+    return matches.astype(float)
+
+
 def miocp_adm(ocp_model, tau_min=0.01, with_CIAP=True, online_plot=None,
               rho_values=None, max_adm_iter=100, epsilon=1e-3,
-              milp_backend=None):
+              milp_backend=None, time_budget=None):
     '''Penalty ADM for mixed-integer optimal control problems with additional
     combinatorial constraints that couple over time.
 
@@ -107,7 +123,24 @@ def miocp_adm(ocp_model, tau_min=0.01, with_CIAP=True, online_plot=None,
     schedule (the paper uses logspace(-3, 6)) can otherwise start with the
     penalty already dominant, locking the iteration onto the initial v_ref.
 
+    time_budget [s]: soft wall-clock limit. The current dwell-feasible
+    reference v_ref is a valid incumbent from the first iteration on; when
+    the budget is exhausted, the iteration stops and the incumbent is
+    returned with reoptimized continuous controls. The method never returns
+    nothing, and the returned switching schedule is always dwell-feasible.
+
     Returns (y, u, beta, v_ref, nodes, obj_val, w, timings).'''
+
+    t_start = time.time()
+
+    def out_of_budget():
+        return (time_budget is not None
+                and time.time() - t_start > time_budget)
+
+    def remaining_budget():
+        if time_budget is None:
+            return None
+        return max(1., time_budget - (time.time() - t_start))
 
     nlp_solver_name = 'ipopt'
     solver = ocp_model.create_NLP_solver(nlp_solver_name, tol=1e-8)
@@ -140,8 +173,11 @@ def miocp_adm(ocp_model, tau_min=0.01, with_CIAP=True, online_plot=None,
         beta = alpha
 
     # data-driven initial combinatorial reference: dwell-feasible projection
-    # of the POC schedule instead of the arbitrary constant configuration
-    v_ref, _, wall_t = tcomb.solve(beta.dot(ocp_model.r), ocp_model.r)
+    # of the POC schedule instead of the arbitrary constant configuration.
+    # v_ref is the incumbent from here on: always binary, always
+    # dwell-feasible.
+    v_ref, _, wall_t = tcomb.solve(beta.dot(ocp_model.r), ocp_model.r,
+                                   time_limit=remaining_budget())
     timings['comb'] += wall_t
 
     out_hdr = '{:>9} {:>9} {:>10} {:>11} {:>9} {:>9}'
@@ -156,6 +192,9 @@ def miocp_adm(ocp_model, tau_min=0.01, with_CIAP=True, online_plot=None,
 
     # penalty loop
     for rho in rho_values:
+        if out_of_budget():
+            print('time budget exhausted, returning incumbent')
+            break
         # forward simulation to obtain correct Psi_l_l
         p = np.concatenate(([rho], v_ref.flatten()))
         y, u, beta, v, nodes, w0, wall_t = resolve_with_fixed_controls(
@@ -166,6 +205,8 @@ def miocp_adm(ocp_model, tau_min=0.01, with_CIAP=True, online_plot=None,
 
         # ADM loop
         for iadm in range(max_adm_iter):
+            if out_of_budget():
+                break
             # solve POC relaxation for (y, u, alpha) at given v_ref
             p = np.concatenate(([rho], v_ref.flatten()))
             sol = solver(x0=w0, p=p, lbx=ocp_model.lbw, ubx=ocp_model.ubw,
@@ -207,7 +248,8 @@ def miocp_adm(ocp_model, tau_min=0.01, with_CIAP=True, online_plot=None,
             # solve combinatorial constraints (tCOMB)
             prev_v_ref = v_ref.copy()
             v_ref, beta_deviation, wall_t = tcomb.solve(
-                beta.dot(ocp_model.r), ocp_model.r)
+                beta.dot(ocp_model.r), ocp_model.r,
+                time_limit=remaining_budget())
             timings['comb'] += wall_t
 
             # objective Psi(u^{k,l+1}, v^{k,l+1}, vtilde^{k,l+1})
@@ -237,7 +279,11 @@ def miocp_adm(ocp_model, tau_min=0.01, with_CIAP=True, online_plot=None,
         if np.linalg.norm(alpha.dot(ocp_model.r) - v_ref, np.inf) < 1e-4:
             break
 
-    # compute feasible point and reoptimize continuous controls
+    # compute feasible point and reoptimize continuous controls. Fixing to
+    # the multipliers of v_ref (rather than the last SUR rounding beta)
+    # guarantees the returned schedule is exactly the dwell-feasible
+    # incumbent, also when the loop was cut short by the time budget.
+    beta = _config_multipliers(v_ref, ocp_model.r)
     y, u, alpha, v, nodes, w0, wall_t = resolve_with_fixed_controls(
         ocp_model, solver, w0.copy(), p, v_fix=v, alpha_fix=beta)
     timings['reopt_nlp'] += wall_t

@@ -8,19 +8,22 @@ convexification (POC).
 Originally Copyright 2018 Andreas Potschka, Claus Teuber (GPL-3.0-or-later).
 '''
 
-from math import sqrt, ceil
+from __future__ import annotations
+
+from math import ceil, sqrt
 
 import casadi as cas
+import matplotlib.pyplot as plt
 import numpy as np
 from scipy.sparse import dok_matrix
-import matplotlib.pyplot as plt
 
 from .. import DATA_DIR, collocation
 from . import networks
 from .networks import in_edges, out_edges
 
 
-def equal_distribution_matrix(delta, off):
+def equal_distribution_matrix(delta: list[list[int]],
+                              off: tuple[int, ...]) -> dok_matrix:
     '''Create equal distribution matrix from list of incoming/outgoing edges
     delta and configuration off'''
     n_edges = len(delta)
@@ -157,7 +160,7 @@ def translines_nlp(net, demand, T=15., lr=1., L=1., C=1., R=1e-3, G=2e-3,
     return nlp, lbw, ubw, lbg, ubg, w0
 
 
-def extract_solution(sol, net, nt, nx):
+def extract_solution(sol: dict, net, nt: int, nx: int) -> tuple:
     'Extract NumPy arrays from CasADi NLP solution'
     _, A, producers, _, _, configs = net()
     n_ctrls = len(producers)
@@ -180,7 +183,7 @@ def extract_solution(sol, net, nt, nx):
     return u, alpha, xi_p, xi_m
 
 
-def load_demand(name, data_dir=None):
+def load_demand(name: str, data_dir=None) -> np.ndarray:
     'Load a demand file (e.g. "demand_extended_tree_coarse.dat").'
     data_dir = DATA_DIR / 'translines' if data_dir is None else data_dir
     path = data_dir / name
@@ -270,7 +273,8 @@ class TranslinesOCModel(collocation.OCModel):
     augmented with the outer-convexified L1 penalty term for the penalty ADM
     (parametric in rho and the combinatorial reference V_ref).'''
 
-    def __init__(self, network_name, coarse=True, data_dir=None):
+    def __init__(self, network_name: str, coarse: bool = True,
+                 data_dir=None) -> None:
         if network_name == 'extended tree':
             self.net = networks.network_extended_tree
         elif network_name == 'subgrid':
@@ -307,7 +311,7 @@ class TranslinesOCModel(collocation.OCModel):
         # augment problem with outer-convexified L1 penalization term
         self.add_l1_penalty(obj_sca=1e-3)
 
-    def extract(self, w):
+    def extract(self, w: np.ndarray) -> tuple:
         'Extract and return (y, u, alpha, v, nodes) from NLP variable w.'
         offset = 0
         alpha = np.reshape(w[offset:offset + (self.nt - 1) * self.n_confg],
@@ -319,7 +323,8 @@ class TranslinesOCModel(collocation.OCModel):
         y = w[offset:offset + 2 * len(self.A) * self.nt * self.nx]
         return y, u, alpha, None, None
 
-    def overwrite(self, w, y=None, u=None, alpha=None, v=None, nodes=None):
+    def overwrite(self, w: np.ndarray, y=None, u=None, alpha=None,
+                  v=None, nodes=None) -> np.ndarray:
         '''Overwrite given components (y, u, alpha, v, nodes) in NLP variable
         w. Returns overwritten w.'''
         offset = 0

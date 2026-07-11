@@ -1,7 +1,7 @@
 import casadi as cas
 import numpy as np
 
-from gasnetopt.collocation import gauss_collocation, direct_transcription
+from gasnetopt.collocation import direct_transcription, gauss_collocation
 
 
 def test_gauss_collocation_partition_of_unity():

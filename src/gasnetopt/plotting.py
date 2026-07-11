@@ -4,8 +4,8 @@ Generic plotting helpers for POC/CIAP results.
 
 from typing import Iterable, Optional, Tuple
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def plot_relaxed_vs_binary_config_index(

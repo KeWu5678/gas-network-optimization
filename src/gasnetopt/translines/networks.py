@@ -8,8 +8,15 @@ bounds, consumer node indices and switching configurations (each given as a
 tuple of switched-off edge indices).
 '''
 
+from __future__ import annotations
 
-def network_extended_tree():
+Edges = tuple[tuple[int, int], ...]
+NetworkData = tuple[tuple[int, ...], Edges, tuple[int, ...],
+                    tuple[float, ...], tuple[int, ...],
+                    tuple[tuple[int, ...], ...]]
+
+
+def network_extended_tree() -> NetworkData:
     'Extended tree network data'
     V = tuple(range(11))
     A = ((0, 2), (1, 4), (2, 5), (2, 3), (2, 4), (4, 5), (3, 6), (3, 7),
@@ -21,7 +28,7 @@ def network_extended_tree():
     return V, A, producers, bounds, consumers, configs
 
 
-def network_subgrid():
+def network_subgrid() -> NetworkData:
     'Subgrid network data'
     V = tuple(range(14))
     A = ((0, 2), (1, 3), (3, 5), (2, 4), (2, 8), (4, 6), (5, 6), (6, 7),
@@ -33,17 +40,17 @@ def network_subgrid():
     return V, A, producers, bounds, consumers, configs
 
 
-def in_edges(A):
+def in_edges(A: Edges) -> list[list[int]]:
     'Compute lists of incoming edges per edge'
-    delta = [[] for _ in A]
+    delta: list[list[int]] = [[] for _ in A]
     for line, (i, j) in enumerate(A):
-        delta[line] += [k for k, (l, m) in enumerate(A) if m == i]
+        delta[line] += [k for k, (lo, m) in enumerate(A) if m == i]
     return delta
 
 
-def out_edges(A):
+def out_edges(A: Edges) -> list[list[int]]:
     'Compute lists of outgoing edges per edge'
-    delta = [[] for _ in A]
+    delta: list[list[int]] = [[] for _ in A]
     for line, (i, j) in enumerate(A):
-        delta[line] += [k for k, (l, m) in enumerate(A) if l == j]
+        delta[line] += [k for k, (lo, m) in enumerate(A) if lo == j]
     return delta

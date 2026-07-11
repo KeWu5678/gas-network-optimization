@@ -2,9 +2,13 @@
 Utility functions for direct collocation discretizations.
 '''
 
+from __future__ import annotations
+
 from itertools import tee
-import numpy as np
+
 import casadi as cas
+import numpy as np
+
 
 def pairwise(iterable):
     "s -> (s0,s1), (s1,s2), (s2, s3), ..."
@@ -12,7 +16,8 @@ def pairwise(iterable):
     next(b, None)
     return zip(a, b)
 
-def gauss_collocation(d, points='legendre'):
+def gauss_collocation(d: int, points: str = 'legendre'
+                      ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     'Compute matrices for Gauss collocation of degree d'
 
     # Get collocation points
@@ -208,7 +213,7 @@ def set_NLP_vars(w, p, d, y=None, u=None, alpha=None, v=None, nodes=None):
     nv = p.get('nv', 0)
     w = np.concatenate((w, [0] * (nu + na + nv + ny*d))) #[0]*x: x-dim zero vector
     # reshape and extract
-    w = np.reshape(w, (-1, ny + nu + na + nv + ny*d)) 
+    w = np.reshape(w, (-1, ny + nu + na + nv + ny*d))
     if y is not None:
         w[:,:ny] = y
     if u is not None:
@@ -227,7 +232,8 @@ class OCModel:
     '''Class interface for optimal control models that we generate by direct
     collocation from the problems in problems.py.'''
 
-    def __init__(self, problem, degree, t):
+    def __init__(self, problem: dict, degree: int,
+                 t: np.ndarray) -> None:
         '''Constructor for problem with collocation discretization of given
         degree on time grid t.
         t: numpy array using linspace'''
@@ -240,24 +246,26 @@ class OCModel:
         self.nalpha = problem.get('nalpha', 0)
         self.r = problem.get('r', np.array([]))
 
-    def extract(self, w):
+    def extract(self, w: np.ndarray) -> tuple:
         'Extract and return (y, u, alpha, v, nodes) from NLP variable w.'
         return get_NLP_vars(w, self.problem, self.degree)
 
-    def overwrite(self, w, y=None, u=None, alpha=None, v=None, nodes=None):
+    def overwrite(self, w: np.ndarray, y=None, u=None, alpha=None,
+                  v=None, nodes=None) -> np.ndarray:
         '''Overwrite given components (y, u, alpha, v, nodes) in NLP variable w.
         Returns overwritten w.'''
         return set_NLP_vars(w, self.problem, self.degree, y, u, alpha, v, nodes)
 
-    def create_NLP_solver(self, nlp_solver_name='ipopt', tol=1e-13):
-        options = {'print_time': False}
+    def create_NLP_solver(self, nlp_solver_name: str = 'ipopt',
+                          tol: float = 1e-13) -> cas.Function:
+        options: dict = {'print_time': False}
         if nlp_solver_name == 'ipopt':
             options['ipopt'] = {'tol': tol, 'print_level': 0}
         elif nlp_solver_name == 'blocksqp':
-            options['opttol'] = tol 
+            options['opttol'] = tol
         return cas.nlpsol('solver', nlp_solver_name, self.nlp, options)
 
-    def add_l1_penalty(self, obj_sca=1.):
+    def add_l1_penalty(self, obj_sca: float = 1.) -> None:
         '''Augment the NLP objective with the outer-convexified L1 coupling
         penalty rho * sum_k h_k sum_i alpha_{k,i} sum_j |r_{i,j} - V_ref_{j,k}|
         of the penalty ADM, parametric in (rho, V_ref). Assumes alpha (shape
@@ -285,7 +293,8 @@ class OCModel:
         self.nlp['f'] = obj_sca * self.nlp['f'] + rho * pen_L1
         self._f_obj = None
 
-    def evaluate_objective(self, rho, v_ref, w):
+    def evaluate_objective(self, rho: float, v_ref: np.ndarray,
+                           w: np.ndarray) -> float:
         '''Evaluate objective with L1 penalization term.'''
         f_obj = getattr(self, '_f_obj', None)
         if f_obj is None:

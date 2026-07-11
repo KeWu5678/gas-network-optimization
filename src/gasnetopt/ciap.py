@@ -9,6 +9,8 @@ Strategies (cf. Göttlich/Hante/Potschka/Schewe, Math. Program. 188 (2021)):
 - 'COMB':    MIP with additional min-up (dwell time) constraints tau_min.
 '''
 
+from __future__ import annotations
+
 import time
 
 import numpy as np
@@ -16,7 +18,7 @@ import numpy as np
 from .milp import MilpModel
 
 
-def sum_up_rounding(t, alpha):
+def sum_up_rounding(t: np.ndarray, alpha: np.ndarray) -> np.ndarray:
     '''Sum-Up Rounding with SOS1 constraint on grid t (len N). alpha has shape
     (N-1, modes). Returns binary p of the same shape.'''
     dt = np.diff(t)
@@ -37,32 +39,35 @@ def sum_up_rounding(t, alpha):
     return p
 
 
-def _min_up_constraints(m, x, t, modes, tau_min):
+def _min_up_constraints(m: MilpModel, x: np.ndarray, t: np.ndarray,
+                        modes: int, tau_min: float) -> None:
     '''Add standard min-up (dwell time) constraints for binary variable array
     x of shape (N-1, modes) on grid t.'''
     N = len(t)
     for mode in range(modes):
         # first time step
-        l = 1
-        while (t[l] <= tau_min) and (l < N - 1):
-            # x[0] <= x[l]
-            m.add_constr({x[0, mode]: 1., x[l, mode]: -1.}, ub=0.)
-            l += 1
+        ell = 1
+        while (t[ell] <= tau_min) and (ell < N - 1):
+            # x[0] <= x[ell]
+            m.add_constr({x[0, mode]: 1., x[ell, mode]: -1.}, ub=0.)
+            ell += 1
         # all other time steps
         for k in range(1, N - 1):
             tk = t[k]
-            l = k + 1
-            while (t[l] <= tk + tau_min) and (l < N - 1):
-                # x[k] - x[k-1] <= x[l]
+            ell = k + 1
+            while (t[ell] <= tk + tau_min) and (ell < N - 1):
+                # x[k] - x[k-1] <= x[ell]
                 m.add_constr({x[k, mode]: 1., x[k-1, mode]: -1.,
-                              x[l, mode]: -1.}, ub=0.)
-                # x[k-1] - x[k] <= 1 - x[l]
+                              x[ell, mode]: -1.}, ub=0.)
+                # x[k-1] - x[k] <= 1 - x[ell]
                 m.add_constr({x[k-1, mode]: 1., x[k, mode]: -1.,
-                              x[l, mode]: 1.}, ub=1.)
-                l += 1
+                              x[ell, mode]: 1.}, ub=1.)
+                ell += 1
 
 
-def solve_ciap(t, alpha, strategy='SUR', tau_min=None, backend=None):
+def solve_ciap(t: np.ndarray, alpha: np.ndarray, strategy: str = 'SUR',
+               tau_min: float | None = None, backend: str | None = None
+               ) -> tuple[np.ndarray, float]:
     '''Solve the CIAP for relaxed multipliers alpha on grid t. Returns
     (beta, wall_time).'''
     assert strategy in ['SUR', 'MIP', 'SUR+MIP', 'COMB'], \
@@ -108,6 +113,7 @@ def solve_ciap(t, alpha, strategy='SUR', tau_min=None, backend=None):
 
     warm = None
     if strategy == 'SUR+MIP':
+        assert p is not None
         warm = np.zeros(m.ncols)
         warm[beta.reshape(-1)] = p.reshape(-1)
 

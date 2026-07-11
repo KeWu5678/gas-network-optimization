@@ -9,6 +9,8 @@ GasLib volumetric flow bounds (1000 m^3/h at norm conditions) are converted
 to mass flow with the norm density given in the .net file.
 '''
 
+from __future__ import annotations
+
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -133,7 +135,7 @@ class GasNetwork:
         return list(self.valves) + list(self.compressors)
 
 
-def _flow_to_kg_per_s(elem, norm_density):
+def _flow_to_kg_per_s(elem, norm_density: float) -> float | None:
     'Convert a flow element (possibly in 1000m_cube_per_hour) to kg/s.'
     if elem is None:
         return None
@@ -146,7 +148,7 @@ def _flow_to_kg_per_s(elem, norm_density):
     raise ValueError('Unsupported flow unit "{}"'.format(unit))
 
 
-def parse_net(path):
+def parse_net(path) -> GasNetwork:
     'Parse a GasLib .net file into a GasNetwork (SI units).'
     root = ET.parse(path).getroot()
     title = None
@@ -250,18 +252,18 @@ class BoundaryConditions:
     massflow: Dict[str, Tuple[np.ndarray, np.ndarray]] = \
         field(default_factory=dict)
 
-    def demand(self, node_id, t):
+    def demand(self, node_id: str, t: np.ndarray) -> np.ndarray:
         'Withdrawal (positive, kg/s) at a sink, interpolated to grid t [s].'
         times, values = self.massflow[node_id]
         return -np.interp(t, times, values)
 
-    def pressure_at(self, node_id, t):
+    def pressure_at(self, node_id: str, t: np.ndarray) -> np.ndarray:
         'Boundary pressure [Pa] at an entry, interpolated to grid t [s].'
         times, values = self.pressure[node_id]
         return np.interp(t, times, values)
 
 
-def parse_bcd(path):
+def parse_bcd(path) -> BoundaryConditions:
     'Parse a TRR154 .bcd boundary condition file (SI units).'
     root = ET.parse(path).getroot()
     meta = {}
@@ -326,7 +328,7 @@ class NetworkState:
     compressor_pressure_diff: Dict[str, float] = field(default_factory=dict)
 
 
-def parse_state(path):
+def parse_state(path) -> NetworkState:
     'Parse a TRR154 .state file (SI units).'
     root = ET.parse(path).getroot()
     state = NetworkState(network='', speed_of_sound=340.)
@@ -380,3 +382,78 @@ def parse_state(path):
                                 state.compressor_pressure_diff[eid] = \
                                     _value(e)
     return state
+
+
+def validate(net: GasNetwork,
+             bc: Optional[BoundaryConditions] = None) -> List[str]:
+    '''Pre-flight data validation: diagnose the data failures that would
+    otherwise surface as solver errors deep inside a solve (0*inf = NaN in
+    the NLP, KeyError at model build, Ipopt restoration failure on
+    infeasible demand). Returns a list of human-readable findings; an empty
+    list means the data passed all checks.'''
+    findings = []
+
+    # switching-element bounds enter POC big-M constraints and must be finite
+    for valve in net.valves:
+        if not np.isfinite(valve.flow_max):
+            findings.append('valve {}: flowMax missing (big-M constraint '
+                            'would be 0*inf)'.format(valve.id))
+    for comp in net.compressors:
+        if not np.isfinite(comp.pressure_out_max):
+            findings.append('compressor {}: pressureOutMax missing (big-M '
+                            'constraint would be 0*inf)'.format(comp.id))
+    for node in net.nodes.values():
+        if not np.isfinite(node.pressure_max):
+            findings.append('node {}: pressureMax missing (pressure span '
+                            'used as big-M would be inf)'.format(node.id))
+
+    # every connection endpoint must be a known node
+    elements = list(net.pipes) + list(net.valves) + list(net.compressors)
+    for e in elements:
+        for end in (e.from_node, e.to_node):
+            if end not in net.nodes:
+                findings.append('{}: endpoint {} is not a node in the '
+                                'network'.format(e.id, end))
+
+    # connectivity: every node reachable from some source (undirected)
+    adj: dict[str, set[str]] = {nid: set() for nid in net.nodes}
+    for e in elements:
+        if e.from_node in adj and e.to_node in adj:
+            adj[e.from_node].add(e.to_node)
+            adj[e.to_node].add(e.from_node)
+    reached = set()
+    stack = [n.id for n in net.sources]
+    while stack:
+        nid = stack.pop()
+        if nid in reached:
+            continue
+        reached.add(nid)
+        stack.extend(adj[nid] - reached)
+    for nid in set(net.nodes) - reached:
+        findings.append('node {}: not connected to any source'.format(nid))
+
+    if bc is not None:
+        if bc.network and bc.network not in net.name:
+            findings.append('boundary data is for network "{}", not '
+                            '"{}"'.format(bc.network, net.name))
+        for node in net.sinks:
+            if node.id not in bc.massflow:
+                findings.append('sink {}: no massflow boundary data in the '
+                                '.bcd (model build would raise '
+                                'KeyError)'.format(node.id))
+        for nid in list(bc.pressure) + list(bc.massflow):
+            if nid not in net.nodes:
+                findings.append('.bcd node {}: not in the network'
+                                .format(nid))
+        # total source capacity must cover peak demand
+        capacity = sum(n.flow_max for n in net.sources)
+        t_all = np.unique(np.concatenate(
+            [times for times, _ in bc.massflow.values()] or [np.zeros(1)]))
+        peak = sum(bc.demand(n.id, t_all).max() for n in net.sinks
+                   if n.id in bc.massflow)
+        if np.isfinite(capacity) and peak > capacity:
+            findings.append('peak demand {:.1f} kg/s exceeds total source '
+                            'capacity {:.1f} kg/s (NLP would be '
+                            'infeasible)'.format(peak, capacity))
+
+    return findings

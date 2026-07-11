@@ -61,11 +61,11 @@ def test_comb_respects_dwell_time(relaxed_instance):
         x = beta[:, mode]
         for k in range(1, N - 1):
             if x[k] > x[k - 1]:  # switched on at t[k]
-                l = k + 1
-                while l < N - 1 and t[l] <= t[k] + tau_min:
-                    assert x[l] == 1, \
+                ell = k + 1
+                while ell < N - 1 and t[ell] <= t[k] + tau_min:
+                    assert x[ell] == 1, \
                         'dwell time violated for mode {}'.format(mode)
-                    l += 1
+                    ell += 1
 
 
 def test_tcomb_returns_feasible_input_unchanged():

@@ -18,34 +18,67 @@ from gasnetopt import DATA_DIR, adm, ciap
 from gasnetopt.gas import gaslib_io
 from gasnetopt.gas.ocmodel import GasOCModel
 
+# CVD-safe categorical triple (blue / orange / purple), reused per group
+GROUP_COLORS = ['#1f77b4', '#ff7f0e', '#9467bd']
 
-def plot_solution(s, title, fname, save_dir):
+
+def plot_solution(s, title, fname, save_dir, obj=None):
+    '''One figure per method: switch schedules, delivery mismatch, pressures.
+
+    The delivery panel shows delivered - demand around a zero baseline (the
+    quantity the objective penalizes) instead of two overlapping curves.'''
     import matplotlib.pyplot as plt
     n_sw = len(s['switch_ids'])
-    n_sink = len(s['sink_ids'])
-    fig, axes = plt.subplots(n_sw + n_sink + 1, 1,
-                             figsize=(9, 2.0 * (n_sw + n_sink + 1)),
+    fig, axes = plt.subplots(n_sw + 2, 1, figsize=(9, 2.0 * (n_sw + 2)),
                              sharex=True, num=title, clear=True)
     t = s['t'] / 3600.
     tc = t[:-1]
 
+    # switch schedules (relaxed in [0, 1], binary after rounding/ADM)
     for j, sid in enumerate(s['switch_ids']):
-        axes[j].step(tc, s['w_switch'][:, j], where='post')
-        axes[j].set_ylabel(sid.split('_')[0])
-        axes[j].set_ylim(-0.05, 1.05)
+        ax = axes[j]
+        w = s['w_switch'][:, j]
+        ax.step(tc, w, where='post', color=GROUP_COLORS[0], linewidth=2)
+        ax.fill_between(tc, w, step='post', color=GROUP_COLORS[0],
+                        alpha=0.12)
+        ax.set_ylabel(sid.split('_')[0])
+        ax.set_ylim(-0.05, 1.05)
+        ax.set_yticks([0., 1.])
+
+    # delivery mismatch per sink
+    ax = axes[n_sw]
+    err = 0.
     for i, sid in enumerate(s['sink_ids']):
-        ax = axes[n_sw + i]
-        ax.plot(tc, s['demand_kg_s'][sid], 'k--', label='demand')
-        ax.plot(tc, s['delivered_kg_s'][sid], 'b-', label='delivered')
-        ax.set_ylabel(sid + ' [kg/s]')
-        if i == 0:
-            ax.legend(fontsize=8)
+        mis = s['delivered_kg_s'][sid] - s['demand_kg_s'][sid]
+        err = max(err, float(np.abs(mis).max()))
+        ax.plot(tc, mis, color=GROUP_COLORS[i % len(GROUP_COLORS)],
+                linewidth=2, label=sid)
+    ax.axhline(0., color='0.6', linewidth=1)
+    ax.set_ylabel('delivered - demand\n[kg/s]')
+    ax.legend(fontsize=8, ncol=len(s['sink_ids']))
+
+    # node pressures: entries solid, exits dashed (color = member within
+    # group), inner nodes muted gray
     ax = axes[-1]
     for nid, p in s['node_pressure_bar'].items():
-        ax.plot(tc, p, label=nid, linewidth=1)
+        if nid in s['src_ids']:
+            i = s['src_ids'].index(nid)
+            ax.plot(tc, p, color=GROUP_COLORS[i % len(GROUP_COLORS)],
+                    linewidth=1.8, label=nid)
+        elif nid in s['sink_ids']:
+            i = s['sink_ids'].index(nid)
+            ax.plot(tc, p, '--', color=GROUP_COLORS[i % len(GROUP_COLORS)],
+                    linewidth=1.8, label=nid)
+        else:
+            ax.plot(tc, p, color='0.75', linewidth=1)
+    ax.plot([], [], color='0.75', linewidth=1, label='inner nodes')
     ax.set_ylabel('p [bar]')
     ax.set_xlabel('time [h]')
-    ax.legend(fontsize=6, ncol=4)
+    ax.legend(fontsize=7, ncol=4)
+
+    if obj is not None:
+        title = '{}   (objective {:.2e}, max delivery error {:.3g} kg/s)' \
+            .format(title, obj, err)
     fig.suptitle(title)
     fig.tight_layout()
     out = Path(save_dir) / fname
@@ -78,6 +111,11 @@ def main():
         net.name, len(net.nodes), len(net.pipes), len(net.valves),
         len(net.compressors)))
 
+    findings = gaslib_io.validate(net, bc)
+    for finding in findings:
+        print('data validation: {}'.format(finding))
+    assert not findings, 'aborting on invalid input data'
+
     model = GasOCModel(net, bc, T=args.horizon, nt=args.nt, nx=args.nx)
     print('NLP: {} variables, {} constraints, {} configurations '
           '({} switches)\n'.format(
@@ -97,7 +135,7 @@ def main():
     print('status {}, objective {:.6e}'.format(ret, obj))
     s = model.solution_dict(w_poc)
     plot_solution(s, 'GasLib-11 POC relaxation', 'poc_relaxed.png',
-                  args.save_dir)
+                  args.save_dir, obj=obj)
 
     y, u, alpha, v, nodes = model.extract(w_poc)
     tau = args.tau_min / model.scaling.T_ref
@@ -110,7 +148,7 @@ def main():
         obj = model.evaluate_objective(0., v_ref, w_sur)
         print('objective {:.6e}'.format(obj))
         s = model.solution_dict(w_sur)
-        plot_solution(s, 'GasLib-11 SUR', 'sur.png', args.save_dir)
+        plot_solution(s, 'GasLib-11 SUR', 'sur.png', args.save_dir, obj=obj)
 
     if args.method in ('all', 'ADM'):
         print('\n=== Penalty ADM with CIAP (tau_min = {:.0f} s) ==='.format(
@@ -121,10 +159,10 @@ def main():
         print('timings: {}'.format(
             {k: round(v, 2) for k, v in timings.items()}))
         s = model.solution_dict(w_adm)
-        plot_solution(s, 'GasLib-11 penalty ADM', 'adm.png', args.save_dir)
+        plot_solution(s, 'GasLib-11 penalty ADM', 'adm.png', args.save_dir,
+                      obj=obj)
 
         # report switching structure
-        t_sec = s['t'][:-1]
         for j, sid in enumerate(s['switch_ids']):
             x = np.round(s['w_switch'][:, j]).astype(int)
             n_switch = int(np.abs(np.diff(x)).sum())

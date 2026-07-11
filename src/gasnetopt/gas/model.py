@@ -39,9 +39,9 @@ Compressor: p_b = p_a + dp, 0 <= dp <= w dp_max, 0 <= q_C <= q_max,
 where w(t) = sum_c alpha_c(t) r_{c,j} is the relaxed switch state.
 '''
 
-from dataclasses import dataclass, field
-from math import sqrt
-from typing import Dict, List, Optional
+from __future__ import annotations
+
+from dataclasses import dataclass
 
 import casadi as cas
 import numpy as np
@@ -72,7 +72,7 @@ class GasScaling:
         return self.m_ref * self.A_ref   # mass flow scale [kg/s]
 
 
-def switch_encoding(n_switches):
+def switch_encoding(n_switches: int) -> np.ndarray:
     '''Binary encoding of all 2^s switch configurations: returns r of shape
     (2^s, s) with r[c, j] = state of switch j in configuration c.'''
     n_confg = 2 ** n_switches
@@ -83,9 +83,11 @@ def switch_encoding(n_switches):
     return r
 
 
-def build_gas_nlp(net, bc, T=7200., nt=121, nx=2, p_ref=50e5,
-                  initial_state=None, p_init=None, gamma_comp=0.02,
-                  eps_fric=1e-3):
+def build_gas_nlp(net, bc, T: float = 7200., nt: int = 121,
+                  nx: int = 2, p_ref: float = 50e5,
+                  initial_state=None, p_init: float | None = None,
+                  gamma_comp: float = 0.02,
+                  eps_fric: float = 1e-3) -> dict:
     '''Build the POC-relaxed NLP for gas network `net` (gaslib_io.GasNetwork)
     with boundary conditions `bc` (gaslib_io.BoundaryConditions).
 
@@ -190,7 +192,8 @@ def build_gas_nlp(net, bc, T=7200., nt=121, nx=2, p_ref=50e5,
 
     # pipe characteristic states xi_pm = m +- rho (scaled), initial column
     # fixed by bounds
-    xi_p, xi_m = {}, {}
+    xi_p: dict = {}
+    xi_m: dict = {}
     for pipe in net.pipes:
         m0, rho0 = init[pipe.id]
         for sign, store in (('p', xi_p), ('m', xi_m)):
@@ -222,7 +225,8 @@ def build_gas_nlp(net, bc, T=7200., nt=121, nx=2, p_ref=50e5,
         return rho_node[node_id]
 
     # pipe boundary mass flux densities (scaled), t = 0..nt-2
-    m_L, m_R = {}, {}
+    m_L: dict = {}
+    m_R: dict = {}
     for pipe in net.pipes:
         mb = pipe.flow_max / (sca.m_ref * pipe.area)
         for name, store in (('L', m_L), ('R', m_R)):

@@ -98,18 +98,9 @@ def test_gas_poc_solves_and_is_physical(solved_model):
 def test_gas_mass_balance_at_innodes(solved_model):
     'Mass balance residual at inner nodes must vanish.'
     model, w = solved_model
-    d = model.data
-    sca = model.scaling
-    s = model.solution_dict(w)
-    # innode N01: pipe02 leaves, CS01 enters, valve V01 leaves
-    m_pipe02 = s['pipe_m']['pipe02_N01_N02']
-    area = model.net.pipes[1].area
-    q_out = m_pipe02[0, :-1] * area   # rough check: flux into first cell
-    q_cs01 = s['flows_kg_s']['CS01_entry03_N01']
-    q_v01 = s['flows_kg_s']['V01_N01_N03']
-    # boundary flux variable equals cell value only up to O(dx); use the
-    # exact constraint instead: residual of net_inflow was enforced == 0,
-    # so verify with the NLP constraint values
+    # residual of net_inflow was enforced == 0, so verify with the exact NLP
+    # constraint values (boundary flux variables equal cell values only up
+    # to O(dx), so a check on the extracted arrays would be approximate)
     g_fun = cas.Function('g', [model.nlp['x']], [model.nlp['g']])
     gval = np.array(g_fun(w)).flatten()
     lbg = np.array(model.lbg)
