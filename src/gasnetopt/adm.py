@@ -22,14 +22,19 @@ from __future__ import annotations
 
 import time
 
+import casadi as cas
 import numpy as np
 
 from .ciap import _min_up_constraints, solve_ciap
+from .collocation import OCModel
 from .milp import MilpModel
 
 
-def resolve_with_fixed_controls(ocp_model, solver, w0, p,
-                                u_fix=None, v_fix=None, alpha_fix=None):
+def resolve_with_fixed_controls(
+        ocp_model: OCModel, solver: cas.Function, w0: np.ndarray,
+        p: np.ndarray, u_fix: np.ndarray | None = None,
+        v_fix: np.ndarray | None = None,
+        alpha_fix: np.ndarray | None = None) -> tuple:
     '''Solve problem with some controls fixed by bounds. Can be used to
     emulate a forward simulation.'''
     # adjust bounds of last POC mode to avoid linear dependence with SOS1
@@ -41,7 +46,7 @@ def resolve_with_fixed_controls(ocp_model, solver, w0, p,
         alpha_bound = None
     lbx = ocp_model.overwrite(np.array(ocp_model.lbw, dtype=float).copy(),
                               u=u_fix, v=v_fix, alpha=alpha_bound)
-    if alpha_fix is not None:
+    if alpha_bound is not None:
         alpha_bound[:, -1] = +2.  # > 1
     ubx = ocp_model.overwrite(np.array(ocp_model.ubw, dtype=float).copy(),
                               u=u_fix, v=v_fix, alpha=alpha_bound)
@@ -109,9 +114,12 @@ def _config_multipliers(v_ref: np.ndarray, r: np.ndarray) -> np.ndarray:
     return matches.astype(float)
 
 
-def miocp_adm(ocp_model, tau_min=0.01, with_CIAP=True, online_plot=None,
-              rho_values=None, max_adm_iter=100, epsilon=1e-3,
-              milp_backend=None, time_budget=None):
+def miocp_adm(ocp_model: OCModel, tau_min: float = 0.01,
+              with_CIAP: bool = True, online_plot=None,
+              rho_values: np.ndarray | None = None,
+              max_adm_iter: int = 100, epsilon: float = 1e-3,
+              milp_backend: str | None = None,
+              time_budget: float | None = None) -> tuple:
     '''Penalty ADM for mixed-integer optimal control problems with additional
     combinatorial constraints that couple over time.
 
@@ -133,11 +141,11 @@ def miocp_adm(ocp_model, tau_min=0.01, with_CIAP=True, online_plot=None,
 
     t_start = time.time()
 
-    def out_of_budget():
+    def out_of_budget() -> bool:
         return (time_budget is not None
                 and time.time() - t_start > time_budget)
 
-    def remaining_budget():
+    def remaining_budget() -> float | None:
         if time_budget is None:
             return None
         return max(1., time_budget - (time.time() - t_start))

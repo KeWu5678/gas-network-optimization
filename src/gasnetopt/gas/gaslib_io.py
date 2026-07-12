@@ -32,7 +32,8 @@ _UNIT_FACTORS = {
 }
 
 
-def _value(elem, default=None):
+def _value(elem: ET.Element | None,
+           default: float | None = None) -> float | None:
     'Read a value/unit attribute pair into SI units.'
     if elem is None:
         return default
@@ -49,7 +50,7 @@ def _value(elem, default=None):
     return val * _UNIT_FACTORS[unit]
 
 
-def _local(tag):
+def _local(tag: str) -> str:
     'Strip XML namespace from a tag.'
     return tag.rsplit('}', 1)[-1]
 
@@ -79,10 +80,10 @@ class Pipe:
     flow_max: float = np.inf
 
     @property
-    def area(self):
+    def area(self) -> float:
         return np.pi * self.diameter ** 2 / 4.
 
-    def friction_factor(self):
+    def friction_factor(self) -> float:
         'Nikuradse friction factor for fully turbulent rough flow.'
         return (2. * np.log10(self.diameter / self.roughness) + 1.138) ** -2
 
@@ -118,19 +119,19 @@ class GasNetwork:
     norm_density: float = 0.785          # kg/m^3
 
     @property
-    def sources(self):
+    def sources(self) -> List[Node]:
         return [n for n in self.nodes.values() if n.type == 'source']
 
     @property
-    def sinks(self):
+    def sinks(self) -> List[Node]:
         return [n for n in self.nodes.values() if n.type == 'sink']
 
     @property
-    def innodes(self):
+    def innodes(self) -> List[Node]:
         return [n for n in self.nodes.values() if n.type == 'innode']
 
     @property
-    def switches(self):
+    def switches(self) -> list:
         'Switchable elements: valves and compressor stations (in this order).'
         return list(self.valves) + list(self.compressors)
 

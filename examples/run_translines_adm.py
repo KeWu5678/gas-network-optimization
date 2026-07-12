@@ -22,7 +22,7 @@ METHODS = ['all', 'SUR', 'COMB CIAP', 'ADM', 'ADM without CIAP',
            'ADM with CIAP']
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--net', choices=['extended tree', 'subgrid'],
                     default='extended tree')

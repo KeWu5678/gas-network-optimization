@@ -5,12 +5,13 @@ Utility functions for direct collocation discretizations.
 from __future__ import annotations
 
 from itertools import tee
+from typing import Iterable, Iterator
 
 import casadi as cas
 import numpy as np
 
 
-def pairwise(iterable):
+def pairwise(iterable: Iterable) -> Iterator[tuple]:
     "s -> (s0,s1), (s1,s2), (s2, s3), ..."
     a, b = tee(iterable)
     next(b, None)
@@ -58,7 +59,7 @@ def gauss_collocation(d: int, points: str = 'legendre'
 
     return B, C, D
 
-def direct_transcription(prob, d, t):
+def direct_transcription(prob: dict, d: int, t: np.ndarray) -> tuple:
     '''Direct transcription of problem prob via Gauss-Legendre collocation of
     degree d on the grid determined by t. Adds simplex SOS1 constraint for
     variables in prob['SOS1']. Returns an NLP.
@@ -73,14 +74,14 @@ def direct_transcription(prob, d, t):
 
     # Start with an empty NLP
     w = []
-    w0 = []
-    lbw = []
-    ubw = []
+    w0: list[float] = []
+    lbw: list[float] = []
+    ubw: list[float] = []
     J = 0
     g = []
-    lbg = []
-    ubg = []
-    v_indices = []
+    lbg: list[float] = []
+    ubg: list[float] = []
+    v_indices: list[int] = []
 
     # Make it parametric if v_ref is part of the problem
     if 'v_ref' in prob:
@@ -187,14 +188,14 @@ def direct_transcription(prob, d, t):
 
     return nlp, lbw, ubw, lbg, ubg, w0, v_indices
 
-def get_NLP_vars(w, p, d):
+def get_NLP_vars(w: np.ndarray, p: dict, d: int) -> tuple:
     'Recover y, u, alpha, v of problem p from NLP solution vector w.'
     # pad with non-existing nodes and controls on final grid point
-    ny = p.get('ny')
-    nu = p.get('nu', 0)
-    na = p.get('nalpha', 0)
-    nv = p.get('nv', 0)
-    w = np.concatenate((w, [0] * (nu + na + nv + ny*d)))
+    ny = int(p['ny'])
+    nu = int(p.get('nu', 0))
+    na = int(p.get('nalpha', 0))
+    nv = int(p.get('nv', 0))
+    w = np.concatenate((w, np.zeros(nu + na + nv + ny*d)))
     # reshape and extract
     w = np.reshape(w, (-1, ny + nu + na + nv + ny*d))
     y, u, alpha, v, nodes = np.hsplit(w, np.cumsum([ny,nu,na,nv]))
@@ -204,14 +205,15 @@ def get_NLP_vars(w, p, d):
     nodes = nodes[:-1,:]
     return y, u, alpha, v, nodes
 
-def set_NLP_vars(w, p, d, y=None, u=None, alpha=None, v=None, nodes=None):
+def set_NLP_vars(w: np.ndarray, p: dict, d: int, y=None, u=None,
+                 alpha=None, v=None, nodes=None) -> np.ndarray:
     'Set NLP variables in w (for problem p, degree d).'
     # pad with non-existing nodes and controls on final grid point
-    ny = p.get('ny')
-    nu = p.get('nu', 0)
-    na = p.get('nalpha', 0)
-    nv = p.get('nv', 0)
-    w = np.concatenate((w, [0] * (nu + na + nv + ny*d))) #[0]*x: x-dim zero vector
+    ny = int(p['ny'])
+    nu = int(p.get('nu', 0))
+    na = int(p.get('nalpha', 0))
+    nv = int(p.get('nv', 0))
+    w = np.concatenate((w, np.zeros(nu + na + nv + ny*d)))
     # reshape and extract
     w = np.reshape(w, (-1, ny + nu + na + nv + ny*d))
     if y is not None:

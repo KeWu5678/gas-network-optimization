@@ -11,6 +11,8 @@ Originally Copyright 2018 Andreas Potschka, Claus Teuber (GPL-3.0-or-later).
 from __future__ import annotations
 
 from math import ceil, sqrt
+from pathlib import Path
+from typing import Callable
 
 import casadi as cas
 import matplotlib.pyplot as plt
@@ -37,8 +39,11 @@ def equal_distribution_matrix(delta: list[list[int]],
     return D
 
 
-def translines_nlp(net, demand, T=15., lr=1., L=1., C=1., R=1e-3, G=2e-3,
-                   nx=10, nt=151):
+def translines_nlp(net: Callable[[], networks.NetworkData],
+                   demand: np.ndarray, T: float = 15., lr: float = 1.,
+                   L: float = 1., C: float = 1., R: float = 1e-3,
+                   G: float = 2e-3, nx: int = 10,
+                   nt: int = 151) -> tuple:
     'Compose NLP from network and other data'
     dx = lr / nx
     dt = T / (nt - 1)
@@ -160,7 +165,8 @@ def translines_nlp(net, demand, T=15., lr=1., L=1., C=1., R=1e-3, G=2e-3,
     return nlp, lbw, ubw, lbg, ubg, w0
 
 
-def extract_solution(sol: dict, net, nt: int, nx: int) -> tuple:
+def extract_solution(sol: dict, net: Callable[[], networks.NetworkData],
+                     nt: int, nx: int) -> tuple:
     'Extract NumPy arrays from CasADi NLP solution'
     _, A, producers, _, _, configs = net()
     n_ctrls = len(producers)
@@ -183,9 +189,10 @@ def extract_solution(sol: dict, net, nt: int, nx: int) -> tuple:
     return u, alpha, xi_p, xi_m
 
 
-def load_demand(name: str, data_dir=None) -> np.ndarray:
+def load_demand(name: str,
+                data_dir: str | Path | None = None) -> np.ndarray:
     'Load a demand file (e.g. "demand_extended_tree_coarse.dat").'
-    data_dir = DATA_DIR / 'translines' if data_dir is None else data_dir
+    data_dir = DATA_DIR / 'translines' if data_dir is None else Path(data_dir)
     path = data_dir / name
     if not path.exists():
         raise FileNotFoundError(
@@ -195,7 +202,10 @@ def load_demand(name: str, data_dir=None) -> np.ndarray:
     return np.loadtxt(path)
 
 
-def plot_solution(net, u, alpha, xi_p, xi_m, demand, T, nt):
+def plot_solution(net: Callable[[], networks.NetworkData],
+                  u: np.ndarray, alpha: np.ndarray, xi_p: list,
+                  xi_m: list, demand: np.ndarray, T: float,
+                  nt: int) -> None:
     'Plot extracted solution'
     _, A, _, _, consumers, _ = net()
     n_ctrls = u.shape[1]
@@ -203,17 +213,18 @@ def plot_solution(net, u, alpha, xi_p, xi_m, demand, T, nt):
     n_consumer = demand.shape[0]
     t = np.linspace(0, T, nt)
 
-    fig, axes = plt.subplots(n_ctrls, 1, num=1, clear=True, figsize=(10, 2.2 * n_ctrls))
-    axes = axes.reshape((-1,)) if n_ctrls > 1 else [axes]
+    fig, axs = plt.subplots(n_ctrls, 1, num=1, clear=True,
+                            figsize=(10, 2.2 * n_ctrls), squeeze=False)
+    axes = axs.ravel()
     for i in range(n_ctrls):
         axes[i].step(t, np.concatenate(([np.nan], u[:, i])))
         axes[i].set_xlabel(r'time $t$')
         axes[i].set_ylabel(r'control $u_{}$'.format(i))
     fig.tight_layout()
 
-    fig, axes = plt.subplots(n_confg + 1, 1, num=2, clear=True,
-                             figsize=(10, 2.5 * (n_confg + 1)))
-    axes = axes.reshape((-1,))
+    fig, axs = plt.subplots(n_confg + 1, 1, num=2, clear=True,
+                            figsize=(10, 2.5 * (n_confg + 1)), squeeze=False)
+    axes = axs.ravel()
     for i in range(n_confg):
         axes[i].step(t, np.concatenate(([np.nan], alpha[:, i])), linewidth=3)
         axes[i].set_ylim(-0.02, 1.02)
@@ -231,8 +242,9 @@ def plot_solution(net, u, alpha, xi_p, xi_m, demand, T, nt):
     n = int(ceil(sqrt(n_edges)))
     m = n - 1 if n * (n - 1) >= n_edges else n
 
-    fig, axes = plt.subplots(m, n, num=3, clear=True, figsize=(3.2 * n, 2.8 * m))
-    axes = axes.reshape((-1,)) if m > 1 or n > 1 else [axes]
+    fig, axs = plt.subplots(m, n, num=3, clear=True,
+                            figsize=(3.2 * n, 2.8 * m), squeeze=False)
+    axes = axs.ravel()
     for i in range(n_edges):
         axes[i].pcolormesh(xi_p[i], cmap='jet')
         axes[i].set_xlabel(r'time $t$')
@@ -242,8 +254,9 @@ def plot_solution(net, u, alpha, xi_p, xi_m, demand, T, nt):
         axes[i].set_visible(False)
     fig.tight_layout()
 
-    fig, axes = plt.subplots(m, n, num=4, clear=True, figsize=(3.2 * n, 2.8 * m))
-    axes = axes.reshape((-1,)) if m > 1 or n > 1 else [axes]
+    fig, axs = plt.subplots(m, n, num=4, clear=True,
+                            figsize=(3.2 * n, 2.8 * m), squeeze=False)
+    axes = axs.ravel()
     for i in range(n_edges):
         axes[i].pcolormesh(xi_m[i], cmap='jet')
         axes[i].set_xlabel(r'time $t$')
@@ -253,9 +266,9 @@ def plot_solution(net, u, alpha, xi_p, xi_m, demand, T, nt):
         axes[i].set_visible(False)
     fig.tight_layout()
 
-    fig, axes = plt.subplots(n_consumer, 1, num=5, clear=True,
-                             figsize=(10, 2.2 * n_consumer))
-    axes = axes.reshape((-1,)) if n_consumer > 1 else [axes]
+    fig, axs = plt.subplots(n_consumer, 1, num=5, clear=True,
+                            figsize=(10, 2.2 * n_consumer), squeeze=False)
+    axes = axs.ravel()
     end_vertices = [j for (i, j) in A]
     for i, consumer in enumerate(consumers):
         line = end_vertices.index(consumer)
@@ -274,7 +287,7 @@ class TranslinesOCModel(collocation.OCModel):
     (parametric in rho and the combinatorial reference V_ref).'''
 
     def __init__(self, network_name: str, coarse: bool = True,
-                 data_dir=None) -> None:
+                 data_dir: str | Path | None = None) -> None:
         if network_name == 'extended tree':
             self.net = networks.network_extended_tree
         elif network_name == 'subgrid':

@@ -23,7 +23,7 @@ NODE_STYLE = {
 }
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('netfile', help='GasLib .net file')
     ap.add_argument('-o', '--out', default='results/topology.png')

@@ -22,7 +22,7 @@ METHODS = [
 ]
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('results', help='results pickle (without .pkl)')
     args = ap.parse_args()

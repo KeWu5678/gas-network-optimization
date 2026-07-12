@@ -46,6 +46,8 @@ from dataclasses import dataclass
 import casadi as cas
 import numpy as np
 
+from . import gaslib_io
+
 
 @dataclass
 class GasScaling:
@@ -56,19 +58,19 @@ class GasScaling:
     A_ref: float        # area scale [m^2]
 
     @property
-    def rho_ref(self):
+    def rho_ref(self) -> float:
         return self.p_ref / self.c ** 2
 
     @property
-    def m_ref(self):
+    def m_ref(self) -> float:
         return self.rho_ref * self.c     # mass flux density scale
 
     @property
-    def T_ref(self):
+    def T_ref(self) -> float:
         return self.L_ref / self.c       # time scale [s]
 
     @property
-    def Q_ref(self):
+    def Q_ref(self) -> float:
         return self.m_ref * self.A_ref   # mass flow scale [kg/s]
 
 
@@ -83,7 +85,9 @@ def switch_encoding(n_switches: int) -> np.ndarray:
     return r
 
 
-def build_gas_nlp(net, bc, T: float = 7200., nt: int = 121,
+def build_gas_nlp(net: gaslib_io.GasNetwork,
+                  bc: gaslib_io.BoundaryConditions,
+                  T: float = 7200., nt: int = 121,
                   nx: int = 2, p_ref: float = 50e5,
                   initial_state=None, p_init: float | None = None,
                   gamma_comp: float = 0.02,

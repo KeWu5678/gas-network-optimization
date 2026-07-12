@@ -18,7 +18,7 @@ from gasnetopt.results_io import load_results
 from gasnetopt.translines.model import extract_solution
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('results', help='results pickle (without .pkl)')
     ap.add_argument('--show', action='store_true')

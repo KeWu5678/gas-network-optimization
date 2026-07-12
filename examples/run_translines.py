@@ -18,7 +18,7 @@ from gasnetopt.ciap import sum_up_rounding
 from gasnetopt.translines import model, networks
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--net', choices=['extended-tree', 'subgrid'],
                     default='extended-tree')

@@ -8,6 +8,8 @@ Usage:
         [--tau-min 900] [--method all] [--save-dir results/gaslib11]
 '''
 
+from __future__ import annotations
+
 import argparse
 from pathlib import Path
 
@@ -22,7 +24,8 @@ from gasnetopt.gas.ocmodel import GasOCModel
 GROUP_COLORS = ['#1f77b4', '#ff7f0e', '#9467bd']
 
 
-def plot_solution(s, title, fname, save_dir, obj=None):
+def plot_solution(s: dict, title: str, fname: str, save_dir: str,
+                  obj: float | None = None) -> None:
     '''One figure per method: switch schedules, delivery mismatch, pressures.
 
     The delivery panel shows delivered - demand around a zero baseline (the
@@ -86,7 +89,7 @@ def plot_solution(s, title, fname, save_dir, obj=None):
     print('saved {}'.format(out))
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--horizon', type=float, default=7200.,
                     help='time horizon [s]')
@@ -140,7 +143,7 @@ def main():
     y, u, alpha, v, nodes = model.extract(w_poc)
     tau = args.tau_min / model.scaling.T_ref
 
-    def report_switching(s):
+    def report_switching(s: dict) -> None:
         for j, sid in enumerate(s['switch_ids']):
             x = np.round(s['w_switch'][:, j]).astype(int)
             n_switch = int(np.abs(np.diff(x)).sum())

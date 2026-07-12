@@ -77,7 +77,7 @@ class MilpModel:
         obj[np.asarray(idx).reshape(-1)] = np.asarray(coeffs).reshape(-1)
         self.obj = obj.tolist()
 
-    def _matrix(self):
+    def _matrix(self) -> sparse.csr_matrix:
         if self._A is None:
             data, ri, ci = [], [], []
             for r, (coeffs, _, _) in enumerate(self.rows):
