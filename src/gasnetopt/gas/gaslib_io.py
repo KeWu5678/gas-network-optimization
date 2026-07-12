@@ -433,7 +433,12 @@ def validate(net: GasNetwork,
         findings.append('node {}: not connected to any source'.format(nid))
 
     if bc is not None:
-        if bc.network and bc.network not in net.name:
+        def canon(name):
+            'GasLib-11.net, GasLib_11 etc. all refer to the same network.'
+            name = name.rsplit('.net', 1)[0].lower()
+            return name.replace('-', '').replace('_', '')
+
+        if bc.network and canon(bc.network) != canon(net.name):
             findings.append('boundary data is for network "{}", not '
                             '"{}"'.format(bc.network, net.name))
         for node in net.sinks:

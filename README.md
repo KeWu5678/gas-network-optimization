@@ -90,7 +90,10 @@ ADM variants deliver the best objectives **and** dwell-feasibility, within
 The penalty ADM turns the fractional POC relaxation (objective 2.2·10⁻⁵)
 into a binary, dwell-feasible schedule — valve cycling, compressors mostly
 on — at objective 5.1·10⁻⁷ with **zero delivery error** and all pressures
-within the 40–70 bar bounds:
+within the 40–70 bar bounds. Sum-Up Rounding reaches a similar tracking
+quality only by chattering: **231 switching events** across the three
+elements (the valve flips roughly every 80 s) against the ADM's **9**,
+a 96 % reduction in switching actions at 24× lower objective:
 
 ![GasLib-11 penalty ADM solution](assets/gaslib11_adm.png)
 

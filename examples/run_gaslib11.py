@@ -140,6 +140,16 @@ def main():
     y, u, alpha, v, nodes = model.extract(w_poc)
     tau = args.tau_min / model.scaling.T_ref
 
+    def report_switching(s):
+        for j, sid in enumerate(s['switch_ids']):
+            x = np.round(s['w_switch'][:, j]).astype(int)
+            n_switch = int(np.abs(np.diff(x)).sum())
+            print('{}: {} switching events, state {:.0%} on'.format(
+                sid, n_switch, x.mean()))
+        err = max(np.abs(s['delivered_kg_s'][k] - s['demand_kg_s'][k]).max()
+                  for k in s['sink_ids'])
+        print('max delivery error: {:.4f} kg/s'.format(err))
+
     if args.method in ('all', 'SUR'):
         print('\n=== Sum-Up Rounding + reoptimization ===')
         beta, _ = ciap.solve_ciap(model.t, alpha, strategy='SUR')
@@ -149,6 +159,7 @@ def main():
         print('objective {:.6e}'.format(obj))
         s = model.solution_dict(w_sur)
         plot_solution(s, 'GasLib-11 SUR', 'sur.png', args.save_dir, obj=obj)
+        report_switching(s)
 
     if args.method in ('all', 'ADM'):
         print('\n=== Penalty ADM with CIAP (tau_min = {:.0f} s) ==='.format(
@@ -161,16 +172,7 @@ def main():
         s = model.solution_dict(w_adm)
         plot_solution(s, 'GasLib-11 penalty ADM', 'adm.png', args.save_dir,
                       obj=obj)
-
-        # report switching structure
-        for j, sid in enumerate(s['switch_ids']):
-            x = np.round(s['w_switch'][:, j]).astype(int)
-            n_switch = int(np.abs(np.diff(x)).sum())
-            print('{}: {} switching events, state {:.0%} on'.format(
-                sid, n_switch, x.mean()))
-        err = max(np.abs(s['delivered_kg_s'][k] - s['demand_kg_s'][k]).max()
-                  for k in s['sink_ids'])
-        print('max delivery error: {:.4f} kg/s'.format(err))
+        report_switching(s)
 
 
 if __name__ == '__main__':
