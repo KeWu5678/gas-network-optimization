@@ -12,6 +12,7 @@ Usage:
 '''
 
 import argparse
+import sys
 
 import numpy as np
 
@@ -23,6 +24,8 @@ METHODS = ['all', 'SUR', 'COMB CIAP', 'ADM', 'ADM without CIAP',
 
 
 def main() -> None:
+    # keep progress observable when stdout is redirected to a file
+    sys.stdout.reconfigure(line_buffering=True)
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--net', choices=['extended tree', 'subgrid'],
                     default='extended tree')

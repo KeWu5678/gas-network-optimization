@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -90,6 +91,8 @@ def plot_solution(s: dict, title: str, fname: str, save_dir: str,
 
 
 def main() -> None:
+    # keep progress observable when stdout is redirected to a file
+    sys.stdout.reconfigure(line_buffering=True)
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--horizon', type=float, default=7200.,
                     help='time horizon [s]')

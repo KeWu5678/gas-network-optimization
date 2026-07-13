@@ -223,10 +223,18 @@ def miocp_adm(ocp_model: OCModel, tau_min: float = 0.01,
                                    time_limit=remaining_budget())
     timings['comb'] += wall_t
 
-    out_hdr = '{:>9} {:>9} {:>10} {:>11} {:>9} {:>9}'
-    output = '{:9.2e} {:9.2e} {:>10s} {:>11s} {:>9s} {:>9s}'
+    # progress rows carry the cumulative wall time and are flushed so that
+    # long runs remain observable through a redirected/piped stdout
+    out_hdr = '{:>9} {:>9} {:>10} {:>11} {:>9} {:>9} {:>8}'
+    output = '{:9.2e} {:9.2e} {:>10s} {:>11s} {:>9s} {:>9s} {:>8s}'
+
+    def progress(rho, psi_ll, psi_lpl='', psi_lplp='', pen='', cond=''):
+        print(output.format(rho, psi_ll, psi_lpl, psi_lplp, pen, cond,
+                            '{:.0f}s'.format(time.time() - t_start)),
+              flush=True)
+
     print(out_hdr.format('rho', 'Psi_l_l', 'Psi_l+1_l', 'Psi_l+1_l+1',
-                         'L1 pen', 'termcond'))
+                         'L1 pen', 'termcond', 'wall'), flush=True)
 
     if rho_values is None:
         t_span = ocp_model.t[-1] - ocp_model.t[0]
@@ -236,7 +244,7 @@ def miocp_adm(ocp_model: OCModel, tau_min: float = 0.01,
     # penalty loop
     for rho in rho_values:
         if out_of_budget():
-            print('time budget exhausted, returning incumbent')
+            print('time budget exhausted, returning incumbent', flush=True)
             break
         # forward simulation to obtain correct Psi_l_l
         p = np.concatenate(([rho], v_ref.flatten()))
@@ -283,9 +291,8 @@ def miocp_adm(ocp_model: OCModel, tau_min: float = 0.01,
                 if online_plot is not None:
                     online_plot(ocp_model.t, rho, Psi_lp_l, y, alpha, beta,
                                 v_ref)
-                print(output.format(rho, Psi_l_l,
-                                    '{:9.2e}'.format(Psi_lp_l), '', '',
-                                    '(i)'))
+                progress(rho, Psi_l_l, '{:9.2e}'.format(Psi_lp_l),
+                         cond='(i)')
                 break
 
             # solve combinatorial constraints (tCOMB)
@@ -306,17 +313,15 @@ def miocp_adm(ocp_model: OCModel, tau_min: float = 0.01,
             if Psi_lp_lp >= Psi_lp_l - eps_abs:
                 if Psi_lp_lp > Psi_lp_l:
                     v_ref = prev_v_ref
-                print(output.format(rho, Psi_l_l,
-                                    '{:9.2e}'.format(Psi_lp_l),
-                                    '{:9.2e}'.format(Psi_lp_lp),
-                                    '{:9.2e}'.format(beta_deviation),
-                                    '(ii)'))
+                progress(rho, Psi_l_l, '{:9.2e}'.format(Psi_lp_l),
+                         '{:9.2e}'.format(Psi_lp_lp),
+                         '{:9.2e}'.format(beta_deviation), '(ii)')
                 break
 
             Psi_l_l = Psi_lp_lp
-            print(output.format(rho, Psi_l_l, '{:9.2e}'.format(Psi_lp_l),
-                                '{:9.2e}'.format(Psi_lp_lp),
-                                '{:9.2e}'.format(beta_deviation), ''))
+            progress(rho, Psi_l_l, '{:9.2e}'.format(Psi_lp_l),
+                     '{:9.2e}'.format(Psi_lp_lp),
+                     '{:9.2e}'.format(beta_deviation))
 
         # stop increasing rho?
         if np.linalg.norm(alpha.dot(ocp_model.r) - v_ref, np.inf) < 1e-4:
@@ -332,7 +337,7 @@ def miocp_adm(ocp_model: OCModel, tau_min: float = 0.01,
     timings['reopt_nlp'] += wall_t
     _assert_feasible(ocp_model, w0, p)
     obj_val = ocp_model.evaluate_objective(0, v_ref, w0)
-    print('\nFinal objective value: {:.10e}'.format(obj_val))
+    print('\nFinal objective value: {:.10e}'.format(obj_val), flush=True)
 
     if online_plot is not None:
         online_plot(ocp_model.t, rho, obj_val, y, alpha, beta, v_ref)
