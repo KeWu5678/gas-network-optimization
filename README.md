@@ -8,10 +8,9 @@ switched on/off over time while a hyperbolic PDE network (gas flow,
 telegraph equations) evolves underneath — and every switch must respect a
 minimum up/down time, the same combinatorial structure as unit-commitment
 scheduling. The package implements the decomposition algorithms of two
-papers ([references](#references)) and applies them to two systems:
+papers ([references](#references)):
 
-- **electric transmission lines** (telegraph equations; the benchmark of
-  [1] and [2]), and
+
 - **transient gas networks** (semilinear isothermal Euler equations) on
   [GasLib](https://gaslib.zib.de) instances with
   [TRR154 transient data](https://www.trr154.fau.de/transient-data/).
@@ -114,15 +113,6 @@ The optimizer is built to *propose a schedule under operational
 constraints*, borrowing the structural signatures of production grid
 optimization:
 
-- **Never return nothing**: `miocp_adm(time_budget=...)` keeps a binary,
-  dwell-feasible incumbent from the first projection on and returns it
-  (with reoptimized continuous controls) when the wall-clock budget runs
-  out. The budget is soft — checked between solver calls, with NLP solves
-  additionally capped by an IPOPT wall-time limit and MILP solves by
-  per-call `time_limit`s that return incumbents; it assumes the budget
-  admits one relaxation solve, one projection and one reoptimization.
-  The returned point's constraint residuals are verified — a failed final
-  solve raises instead of reporting an unverified objective.
 - **Data validation as its own layer**: `gaslib_io.validate(net, bc)`
   diagnoses dirty data by name (missing bounds that would poison the NLP
   with 0·∞ = NaN, sinks without boundary data, disconnected nodes, demand
@@ -130,9 +120,7 @@ optimization:
 - **Determinism**: single-threaded solver settings, seeded tests, locked
   dependencies (`uv.lock`), and a Docker image (pinned base images) that
   reproduces the experiments in the locked environment.
-- **Quality gates in CI**: pytest (the gas code path is covered by a
-  synthetic network fixture, so CI needs no third-party data), ruff, and
-  mypy on every push.
+
 
 ## Repository layout
 
