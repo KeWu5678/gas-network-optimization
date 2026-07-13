@@ -2,17 +2,23 @@
 Utility functions for direct collocation discretizations.
 '''
 
-from itertools import tee
-import numpy as np
-import casadi as cas
+from __future__ import annotations
 
-def pairwise(iterable):
+from itertools import tee
+from typing import Iterable, Iterator
+
+import casadi as cas
+import numpy as np
+
+
+def pairwise(iterable: Iterable) -> Iterator[tuple]:
     "s -> (s0,s1), (s1,s2), (s2, s3), ..."
     a, b = tee(iterable)
     next(b, None)
     return zip(a, b)
 
-def gauss_collocation(d, points='legendre'):
+def gauss_collocation(d: int, points: str = 'legendre'
+                      ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     'Compute matrices for Gauss collocation of degree d'
 
     # Get collocation points
@@ -53,7 +59,7 @@ def gauss_collocation(d, points='legendre'):
 
     return B, C, D
 
-def direct_transcription(prob, d, t):
+def direct_transcription(prob: dict, d: int, t: np.ndarray) -> tuple:
     '''Direct transcription of problem prob via Gauss-Legendre collocation of
     degree d on the grid determined by t. Adds simplex SOS1 constraint for
     variables in prob['SOS1']. Returns an NLP.
@@ -68,14 +74,14 @@ def direct_transcription(prob, d, t):
 
     # Start with an empty NLP
     w = []
-    w0 = []
-    lbw = []
-    ubw = []
+    w0: list[float] = []
+    lbw: list[float] = []
+    ubw: list[float] = []
     J = 0
     g = []
-    lbg = []
-    ubg = []
-    v_indices = []
+    lbg: list[float] = []
+    ubg: list[float] = []
+    v_indices: list[int] = []
 
     # Make it parametric if v_ref is part of the problem
     if 'v_ref' in prob:
@@ -182,14 +188,14 @@ def direct_transcription(prob, d, t):
 
     return nlp, lbw, ubw, lbg, ubg, w0, v_indices
 
-def get_NLP_vars(w, p, d):
+def get_NLP_vars(w: np.ndarray, p: dict, d: int) -> tuple:
     'Recover y, u, alpha, v of problem p from NLP solution vector w.'
     # pad with non-existing nodes and controls on final grid point
-    ny = p.get('ny')
-    nu = p.get('nu', 0)
-    na = p.get('nalpha', 0)
-    nv = p.get('nv', 0)
-    w = np.concatenate((w, [0] * (nu + na + nv + ny*d)))
+    ny = int(p['ny'])
+    nu = int(p.get('nu', 0))
+    na = int(p.get('nalpha', 0))
+    nv = int(p.get('nv', 0))
+    w = np.concatenate((w, np.zeros(nu + na + nv + ny*d)))
     # reshape and extract
     w = np.reshape(w, (-1, ny + nu + na + nv + ny*d))
     y, u, alpha, v, nodes = np.hsplit(w, np.cumsum([ny,nu,na,nv]))
@@ -199,16 +205,17 @@ def get_NLP_vars(w, p, d):
     nodes = nodes[:-1,:]
     return y, u, alpha, v, nodes
 
-def set_NLP_vars(w, p, d, y=None, u=None, alpha=None, v=None, nodes=None):
+def set_NLP_vars(w: np.ndarray, p: dict, d: int, y=None, u=None,
+                 alpha=None, v=None, nodes=None) -> np.ndarray:
     'Set NLP variables in w (for problem p, degree d).'
     # pad with non-existing nodes and controls on final grid point
-    ny = p.get('ny')
-    nu = p.get('nu', 0)
-    na = p.get('nalpha', 0)
-    nv = p.get('nv', 0)
-    w = np.concatenate((w, [0] * (nu + na + nv + ny*d))) #[0]*x: x-dim zero vector
+    ny = int(p['ny'])
+    nu = int(p.get('nu', 0))
+    na = int(p.get('nalpha', 0))
+    nv = int(p.get('nv', 0))
+    w = np.concatenate((w, np.zeros(nu + na + nv + ny*d)))
     # reshape and extract
-    w = np.reshape(w, (-1, ny + nu + na + nv + ny*d)) 
+    w = np.reshape(w, (-1, ny + nu + na + nv + ny*d))
     if y is not None:
         w[:,:ny] = y
     if u is not None:
@@ -227,7 +234,8 @@ class OCModel:
     '''Class interface for optimal control models that we generate by direct
     collocation from the problems in problems.py.'''
 
-    def __init__(self, problem, degree, t):
+    def __init__(self, problem: dict, degree: int,
+                 t: np.ndarray) -> None:
         '''Constructor for problem with collocation discretization of given
         degree on time grid t.
         t: numpy array using linspace'''
@@ -240,27 +248,64 @@ class OCModel:
         self.nalpha = problem.get('nalpha', 0)
         self.r = problem.get('r', np.array([]))
 
-    def extract(self, w):
+    def extract(self, w: np.ndarray) -> tuple:
         'Extract and return (y, u, alpha, v, nodes) from NLP variable w.'
         return get_NLP_vars(w, self.problem, self.degree)
 
-    def overwrite(self, w, y=None, u=None, alpha=None, v=None, nodes=None):
+    def overwrite(self, w: np.ndarray, y=None, u=None, alpha=None,
+                  v=None, nodes=None) -> np.ndarray:
         '''Overwrite given components (y, u, alpha, v, nodes) in NLP variable w.
         Returns overwritten w.'''
         return set_NLP_vars(w, self.problem, self.degree, y, u, alpha, v, nodes)
 
-    def create_NLP_solver(self, nlp_solver_name='ipopt', tol=1e-13):
-        options = {'print_time': False}
+    def create_NLP_solver(self, nlp_solver_name: str = 'ipopt',
+                          tol: float = 1e-13,
+                          max_wall_time: float | None = None
+                          ) -> cas.Function:
+        options: dict = {'print_time': False}
         if nlp_solver_name == 'ipopt':
             options['ipopt'] = {'tol': tol, 'print_level': 0}
+            if max_wall_time is not None:
+                options['ipopt']['max_wall_time'] = max_wall_time
         elif nlp_solver_name == 'blocksqp':
-            options['opttol'] = tol 
+            options['opttol'] = tol
         return cas.nlpsol('solver', nlp_solver_name, self.nlp, options)
 
-    def evaluate_objective(self, rho, v_ref, w):
+    def add_l1_penalty(self, obj_sca: float = 1.) -> None:
+        '''Augment the NLP objective with the outer-convexified L1 coupling
+        penalty rho * sum_k h_k sum_i alpha_{k,i} sum_j |r_{i,j} - V_ref_{j,k}|
+        of the penalty ADM, parametric in (rho, V_ref). Assumes alpha (shape
+        (nt-1, nalpha)) is stored first in nlp['x'] and r is binary. The
+        original objective is scaled by obj_sca.'''
+        nt = len(self.t)
+        rho = cas.MX.sym('rho')
+        V_ref = cas.MX.sym('V_ref', self.nv_ref, nt - 1)
+        self.nlp['p'] = cas.vertcat(rho, cas.vec(V_ref))
+        alpha = cas.reshape(self.nlp['x'][:(nt - 1) * self.nalpha],
+                            nt - 1, self.nalpha)
+        pen_L1 = 0
+        for k, (tk, tkp1) in enumerate(pairwise(self.t)):
+            integrand = 0
+            for i in range(self.nalpha):
+                for j in range(self.nv_ref):
+                    # explicit cases for signs in absolute value function
+                    if self.r[i, j] == 0:  # -> |x| = +x >= 0
+                        integrand += V_ref[j, k] * alpha[k, i]
+                    elif self.r[i, j] == 1:  # -> |x| = -x >= 0
+                        integrand += (1 - V_ref[j, k]) * alpha[k, i]
+                    else:
+                        raise Exception('Array r not binary')
+            pen_L1 = pen_L1 + (tkp1 - tk) * integrand
+        self.nlp['f'] = obj_sca * self.nlp['f'] + rho * pen_L1
+        self._f_obj = None
+
+    def evaluate_objective(self, rho: float, v_ref: np.ndarray,
+                           w: np.ndarray) -> float:
         '''Evaluate objective with L1 penalization term.'''
-        f_obj = cas.Function('obj',
-                [self.nlp['x'], self.nlp['p']], [self.nlp['f']])
+        f_obj = getattr(self, '_f_obj', None)
+        if f_obj is None:
+            f_obj = self._f_obj = cas.Function(
+                'obj', [self.nlp['x'], self.nlp['p']], [self.nlp['f']])
         p = np.concatenate(([rho], v_ref.flatten()))
         return float(f_obj(w, p))
 

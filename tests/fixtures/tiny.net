@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic 3-node test network (source - compressor - pipe - sink) in
+     GasLib .net format. Exists so that the gas code path is covered in CI
+     without redistributing GasLib/TRR154 data. -->
+<network>
+  <information>
+    <title>Tiny-3</title>
+  </information>
+  <nodes>
+    <source id="src" x="0" y="0">
+      <height value="0" unit="m"/>
+      <pressureMin value="40" unit="bar"/>
+      <pressureMax value="70" unit="bar"/>
+      <flowMin value="0" unit="1000m_cube_per_hour"/>
+      <flowMax value="300" unit="1000m_cube_per_hour"/>
+      <normDensity value="0.785" unit="kg_per_m_cube"/>
+    </source>
+    <innode id="mid" x="1" y="0">
+      <height value="0" unit="m"/>
+      <pressureMin value="40" unit="bar"/>
+      <pressureMax value="70" unit="bar"/>
+    </innode>
+    <sink id="snk" x="2" y="0">
+      <height value="0" unit="m"/>
+      <pressureMin value="40" unit="bar"/>
+      <pressureMax value="70" unit="bar"/>
+      <flowMin value="0" unit="1000m_cube_per_hour"/>
+      <flowMax value="300" unit="1000m_cube_per_hour"/>
+    </sink>
+  </nodes>
+  <connections>
+    <compressorStation id="cs" from="src" to="mid">
+      <flowMin value="0" unit="1000m_cube_per_hour"/>
+      <flowMax value="300" unit="1000m_cube_per_hour"/>
+      <pressureInMin value="40" unit="bar"/>
+      <pressureOutMax value="70" unit="bar"/>
+    </compressorStation>
+    <pipe id="pipe" from="mid" to="snk">
+      <length value="10" unit="km"/>
+      <diameter value="500" unit="mm"/>
+      <roughness value="0.05" unit="mm"/>
+      <flowMax value="300" unit="1000m_cube_per_hour"/>
+    </pipe>
+  </connections>
+</network>

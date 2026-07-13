@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# Generated results and figures
+results/
+*.bak
+*.dir
+
+# Third-party data (GasLib networks, TRR154 transient data) and reference
+# papers; keep local, do not commit. The project-own transmission-lines
+# demand profiles and design notes stay tracked.
+data/*
+!data/translines/
+docs/references/
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/

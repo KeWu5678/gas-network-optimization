@@ -1,0 +1,54 @@
+[project]
+name = "gasnetopt"
+version = "0.1.0"
+description = "Mixed-integer optimal control of transmission lines and gas networks via partial outer convexification, CIAP and penalty ADM"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-or-later" }
+dependencies = [
+    "casadi>=3.6",
+    "numpy>=1.24",
+    "scipy>=1.9",
+    "matplotlib>=3.7",
+]
+
+[project.optional-dependencies]
+gurobi = ["gurobipy>=10"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.4",
+    "mypy>=1.10",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gasnetopt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+src = ["src", "tests", "examples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src"]
+ignore_missing_imports = true
+
+# The XML parsers work against ElementTree's Optional-returning API;
+# attributes required by the GasLib/TRR154 schemas are read with .get(),
+# which mypy cannot know is non-None there.
+[[tool.mypy.overrides]]
+module = "gasnetopt.gas.gaslib_io"
+disable_error_code = [
+    "union-attr", "index", "arg-type", "assignment", "return-value",
+]

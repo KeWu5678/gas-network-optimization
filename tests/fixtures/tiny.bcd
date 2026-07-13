@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Boundary conditions for the synthetic Tiny-3 test network, TRR154 .bcd
+     format: entry pressure at the source, ramping withdrawal at the sink
+     (negative massflow = withdrawal). -->
+<boundaryConditions>
+  <metadata>
+    <network>Tiny-3</network>
+    <timeInterval start="0" end="3600"/>
+    <speedOfSound value="340" unit="m_per_s"/>
+  </metadata>
+  <nodes>
+    <node id="src">
+      <nodedata>
+        <time value="0" unit="s"/>
+        <pressure value="53" unit="bar"/>
+      </nodedata>
+      <nodedata>
+        <time value="3600" unit="s"/>
+        <pressure value="53" unit="bar"/>
+      </nodedata>
+    </node>
+    <node id="snk">
+      <nodedata>
+        <time value="0" unit="s"/>
+        <massflow value="-20" unit="kg_per_s"/>
+      </nodedata>
+      <nodedata>
+        <time value="3600" unit="s"/>
+        <massflow value="-25" unit="kg_per_s"/>
+      </nodedata>
+    </node>
+  </nodes>
+</boundaryConditions>
