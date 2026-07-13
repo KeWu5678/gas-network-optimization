@@ -19,3 +19,6 @@ docs/references/
 
 # OS
 .DS_Store
+
+# Editor
+.vscode/
