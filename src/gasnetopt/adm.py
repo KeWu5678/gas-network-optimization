@@ -30,13 +30,12 @@ from .collocation import OCModel
 from .milp import MilpModel
 
 
-def resolve_with_fixed_controls(
-        ocp_model: OCModel, solver: cas.Function, w0: np.ndarray,
-        p: np.ndarray, u_fix: np.ndarray | None = None,
+def _bounds_with_fixed_controls(
+        ocp_model: OCModel, u_fix: np.ndarray | None = None,
         v_fix: np.ndarray | None = None,
-        alpha_fix: np.ndarray | None = None) -> tuple:
-    '''Solve problem with some controls fixed by bounds. Can be used to
-    emulate a forward simulation.'''
+        alpha_fix: np.ndarray | None = None
+        ) -> tuple[np.ndarray, np.ndarray]:
+    '''Return NLP variable bounds with the requested controls fixed.'''
     # adjust bounds of last POC mode to avoid linear dependence with SOS1
     # constraint
     if alpha_fix is not None:
@@ -50,6 +49,18 @@ def resolve_with_fixed_controls(
         alpha_bound[:, -1] = +2.  # > 1
     ubx = ocp_model.overwrite(np.array(ocp_model.ubw, dtype=float).copy(),
                               u=u_fix, v=v_fix, alpha=alpha_bound)
+    return lbx, ubx
+
+
+def resolve_with_fixed_controls(
+        ocp_model: OCModel, solver: cas.Function, w0: np.ndarray,
+        p: np.ndarray, u_fix: np.ndarray | None = None,
+        v_fix: np.ndarray | None = None,
+        alpha_fix: np.ndarray | None = None) -> tuple:
+    '''Solve problem with some controls fixed by bounds. Can be used to
+    emulate a forward simulation.'''
+    lbx, ubx = _bounds_with_fixed_controls(
+        ocp_model, u_fix=u_fix, v_fix=v_fix, alpha_fix=alpha_fix)
     sol = solver(x0=w0, p=p, lbx=lbx, ubx=ubx,
                  lbg=ocp_model.lbg, ubg=ocp_model.ubg)
     ret = solver.stats()['return_status']
@@ -115,16 +126,35 @@ def _config_multipliers(v_ref: np.ndarray, r: np.ndarray) -> np.ndarray:
 
 
 def _assert_feasible(ocp_model: OCModel, w: np.ndarray, p: np.ndarray,
+                     lbx: np.ndarray, ubx: np.ndarray, status: str,
                      tol: float = 1e-6) -> None:
-    '''Verify the NLP constraint residuals of w. An unsuccessful IPOPT
-    status in a reoptimization only triggers a warning (the iterate is used
-    as an objective probe); the *returned* solution must never be an
-    unverified infeasible point.'''
+    '''Verify solver status, finiteness, variable bounds and NLP constraints.'''
+    solved = ['Solve_Succeeded', 'Solved_To_Acceptable_Level']
+    if status not in solved:
+        raise RuntimeError(
+            'Final reoptimization failed with status "{}"; no feasible point '
+            'to return.'.format(status))
+    if not np.all(np.isfinite(w)) or not np.all(np.isfinite(p)):
+        raise RuntimeError(
+            'Final reoptimization returned non-finite values; no feasible '
+            'point to return.')
+
+    bound_viol = np.maximum(lbx - w, w - ubx).max()
+    if bound_viol > tol:
+        raise RuntimeError(
+            'Final reoptimization violates variable bounds (max violation '
+            '{:.3e} > {:.0e}); no feasible point to return.'.format(
+                bound_viol, tol))
+
     nlp = ocp_model.nlp
     args = ([nlp['x'], nlp['p']], [nlp['g']]) if 'p' in nlp \
         else ([nlp['x']], [nlp['g']])
     g_fun = cas.Function('g', *args)
     gval = np.array(g_fun(w, p) if 'p' in nlp else g_fun(w)).flatten()
+    if not np.all(np.isfinite(gval)):
+        raise RuntimeError(
+            'Final reoptimization returned non-finite constraint values; no '
+            'feasible point to return.')
     viol = np.maximum(np.array(ocp_model.lbg) - gval,
                       gval - np.array(ocp_model.ubg)).max()
     if viol > tol:
@@ -332,10 +362,13 @@ def miocp_adm(ocp_model: OCModel, tau_min: float = 0.01,
     # guarantees the returned schedule is exactly the dwell-feasible
     # incumbent, also when the loop was cut short by the time budget.
     beta = _config_multipliers(v_ref, ocp_model.r)
+    final_lbx, final_ubx = _bounds_with_fixed_controls(
+        ocp_model, v_fix=v, alpha_fix=beta)
     y, u, alpha, v, nodes, w0, wall_t = resolve_with_fixed_controls(
         ocp_model, solver, w0.copy(), p, v_fix=v, alpha_fix=beta)
     timings['reopt_nlp'] += wall_t
-    _assert_feasible(ocp_model, w0, p)
+    _assert_feasible(ocp_model, w0, p, final_lbx, final_ubx,
+                     solver.stats()['return_status'])
     obj_val = ocp_model.evaluate_objective(0, v_ref, w0)
     print('\nFinal objective value: {:.10e}'.format(obj_val), flush=True)
 

@@ -160,7 +160,7 @@ Requires [uv](https://docs.astral.sh/uv/):
 
 ```sh
 uv sync                      # locked environment (casadi/ipopt, numpy, scipy)
-uv run pytest                # 22 tests; gas benchmark tests skip without data
+uv run pytest                # 25 tests; gas benchmark tests skip without data
 
 # transmission lines: POC + SUR (runs from the repo alone)
 uv run python examples/run_translines.py
@@ -171,7 +171,8 @@ uv run python examples/make_results_table.py \
     results/translines/translines_extended_tree_results
 
 # gas network (needs GasLib data, see Data below)
-uv run python examples/run_gaslib11.py --tau-min 900
+uv run python examples/run_gaslib11.py \
+    --horizon 3600 --nt 61 --tau-min 900
 ```
 
 Or via Docker (same locked environment):

@@ -4,7 +4,7 @@ POC relaxation -> Sum-Up Rounding -> penalty ADM with dwell-time constraints
 for the valve and the two compressor stations.
 
 Usage:
-    uv run python examples/run_gaslib11.py [--horizon 7200] [--nt 121]
+    uv run python examples/run_gaslib11.py [--horizon 3600] [--nt 61]
         [--tau-min 900] [--method all] [--save-dir results/gaslib11]
 '''
 
@@ -94,9 +94,9 @@ def main() -> None:
     # keep progress observable when stdout is redirected to a file
     sys.stdout.reconfigure(line_buffering=True)
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--horizon', type=float, default=7200.,
+    ap.add_argument('--horizon', type=float, default=3600.,
                     help='time horizon [s]')
-    ap.add_argument('--nt', type=int, default=121,
+    ap.add_argument('--nt', type=int, default=61,
                     help='number of time grid points')
     ap.add_argument('--nx', type=int, default=2, help='cells per pipe')
     ap.add_argument('--tau-min', type=float, default=900.,

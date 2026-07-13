@@ -3,8 +3,11 @@ GasLib/TRR154 data): parsing, data validation, model build, POC solve, and
 the penalty-ADM time-budget fallback.'''
 
 from pathlib import Path
+from types import SimpleNamespace
 
+import casadi as cas
 import numpy as np
+import pytest
 
 from gasnetopt import adm
 from gasnetopt.gas import gaslib_io
@@ -84,6 +87,44 @@ def test_poc_solves_on_fixture():
     assert np.allclose(s['alpha'].sum(axis=1), 1., atol=1e-6)   # SOS1
     err = np.abs(s['delivered_kg_s']['snk'] - s['demand_kg_s']['snk']).max()
     assert err < 0.5
+
+
+def test_compressor_envelope_applies_in_bypass():
+    net, bc = tiny()
+    net.compressors[0].pressure_in_min = 55e5
+    net.compressors[0].pressure_out_max = 60e5
+    model = GasOCModel(net, bc, T=600., nt=42, nx=2, p_init=56e5)
+    solver = model.create_NLP_solver(tol=1e-7)
+    v_ref = np.zeros((len(model.t) - 1, model.nv_ref))
+    p = np.concatenate(([0.], v_ref.flatten()))
+    beta = np.zeros((len(model.t) - 1, model.nalpha))
+    beta[:, 0] = 1.  # compressor bypassed
+    *_, w, _ = adm.resolve_with_fixed_controls(
+        model, solver, model.w0.copy(), p, alpha_fix=beta)
+    assert solver.stats()['return_status'] in [
+        'Solve_Succeeded', 'Solved_To_Acceptable_Level']
+    solution = model.solution_dict(w)
+    for nid in ('src', 'mid'):
+        pressure = solution['node_pressure_bar'][nid]
+        assert pressure.min() >= 55. - 1e-5
+        assert pressure.max() <= 60. + 1e-5
+
+
+def test_final_feasibility_checks_status_finiteness_and_bounds():
+    x = cas.MX.sym('x')
+    model = SimpleNamespace(
+        nlp={'x': x, 'g': x - x}, lbg=[0.], ubg=[0.])
+    lbx, ubx, p = np.array([0.]), np.array([1.]), np.array([])
+
+    with pytest.raises(RuntimeError, match='status'):
+        adm._assert_feasible(
+            model, np.array([0.5]), p, lbx, ubx, 'Maximum_Iterations_Exceeded')
+    with pytest.raises(RuntimeError, match='non-finite'):
+        adm._assert_feasible(
+            model, np.array([np.nan]), p, lbx, ubx, 'Solve_Succeeded')
+    with pytest.raises(RuntimeError, match='variable bounds'):
+        adm._assert_feasible(
+            model, np.array([2.]), p, lbx, ubx, 'Solve_Succeeded')
 
 
 def test_adm_time_budget_returns_dwell_feasible_incumbent():

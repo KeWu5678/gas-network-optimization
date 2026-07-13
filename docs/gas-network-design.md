@@ -163,7 +163,8 @@ Element models:
 - valve (a,b):   |q_V| ≤ w·q_max,  |p_a − p_b| ≤ (1−w)·M, with
   M = min(pressureDifferentialMax, global pressure span);
 - compressor (a,b):  p_b = p_a + Δp,  0 ≤ Δp ≤ w·Δp_max,  0 ≤ q_C ≤ q_max
-  ("off" = bypass with Δp = 0).
+  ("off" = bypass with Δp = 0); because the same station carries flow in
+  either state, pressureInMin ≤ p_a and p_b ≤ pressureOutMax always apply.
 
 For binary w these constraints are exact; for relaxed w they are a valid
 relaxation, so POC → CIAP → reoptimization and the penalty ADM apply
@@ -226,21 +227,19 @@ start-up penalties in the tCOMB objective — not per-device dwell.
 
 ## 4. Validation (examples/run_gaslib11.py, tests/test_gas.py)
 
-On GasLib-11 with the sinus `.bcd`, 2 h horizon, Δt = 60 s, 2 cells/pipe
-(9032 variables, 7800 constraints):
+On GasLib-11 with the sinus `.bcd`, 1 h horizon, Δt = 60 s, 2 cells/pipe
+(4532 variables, 5100 constraints):
 
-- POC relaxation: IPOPT `Solve_Succeeded`, objective ≈ 2.2·10⁻⁵;
-- SUR + reoptimization: binary multipliers, objective same order;
-- penalty ADM (τ_min = 900 s, HiGHS MILP backend): converges in 2 penalty
-  steps to a dwell-time-feasible binary schedule (valve open, compressors
-  bypassed) with zero delivery error;
+- POC relaxation: IPOPT local solution, objective ≈ 1.1·10⁻⁵;
+- SUR + reoptimization: objective ≈ 5.8·10⁻⁶ with 102 switching events;
+- penalty ADM (τ_min = 900 s, HiGHS MILP backend): objective ≈ 3.3·10⁻⁸
+  with 7 switching events, dwell-feasible and zero delivery error;
 - pressures stay within the `.net` bounds; equality constraints (mass
   balances, dynamics) satisfied to < 10⁻⁶.
 
-For this easy scenario the network can serve the demand in a constant
-configuration — the discrete structure becomes binding for longer horizons
-(24 h sinusoidal swing), tighter pressure/flow bounds, or supply outage
-scenarios, which is the natural next experiment.
+The run takes roughly 2 minutes end-to-end on IPOPT + HiGHS. On the finer
+2 h grid (nt = 121), the now-active inner tCOMB solves exceed 1.5 h total on
+HiGHS; use Gurobi or a time budget for that grid.
 
 ## 5. Dependency assessment
 

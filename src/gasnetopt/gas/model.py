@@ -36,6 +36,7 @@ are the binary controls. All 2^s on/off combinations form the configuration
 set; convex multipliers alpha(t) with SOS1 constraint relax the choice.
 Valve: |q_V| <= w q_max, |p_a - p_b| <= (1-w) M.
 Compressor: p_b = p_a + dp, 0 <= dp <= w dp_max, 0 <= q_C <= q_max,
+with the station pressure envelope enforced both while running and in bypass;
 where w(t) = sum_c alpha_c(t) r_{c,j} is the relaxed switch state.
 '''
 
@@ -355,10 +356,10 @@ def build_gas_nlp(net: gaslib_io.GasNetwork,
         p_out = node_pressure(comp.to_node)
         add_eq(p_out - p_in - dp_comp[comp.id])  # p_out = p_in + dp
         add_le(dp_comp[comp.id] - wc * dp_max)   # dp <= w dp_max
-        # operating-pressure window, binding only while the station runs:
-        # pressureInMin <= p_in, p_out <= pressureOutMax (big-M off-relief)
-        add_le(comp.pressure_in_min / p_ref - p_in - (1. - wc) * rho_span)
-        add_le(p_out - comp.pressure_out_max / p_ref - (1. - wc) * rho_span)
+        # The same station carries flow in compression and bypass, so its
+        # equipment pressure envelope applies in both states.
+        add_le(comp.pressure_in_min / p_ref - p_in)
+        add_le(p_out - comp.pressure_out_max / p_ref)
 
     # ------------------------------------------------------------------ #
     # node mass balances and objective                                    #
