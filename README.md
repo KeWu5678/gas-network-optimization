@@ -88,23 +88,25 @@ ADM variants deliver the best objectives **and** dwell-feasibility, within
 
 ![Binary schedules per method](assets/translines_schedules.png)
 
-### Transient gas network (GasLib-11, TRR154 sinus scenario, 2 h, τ_min = 900 s)
+### Transient gas network (GasLib-11, TRR154 sinus scenario, 1 h, τ_min = 900 s)
 
-The penalty ADM turns the fractional POC relaxation (objective 2.2·10⁻⁵)
-into a binary, dwell-feasible schedule — valve cycling, compressors mostly
-on — at objective 5.1·10⁻⁷ with **zero delivery error** and all pressures
-within the 40–70 bar bounds. Sum-Up Rounding reaches a similar tracking
-quality only by chattering: **231 switching events** across the three
-elements (the valve flips roughly every 80 s) against the ADM's **9**,
-a 96 % reduction in switching actions at 24× lower objective:
+The penalty ADM turns the fractional POC relaxation (local solution,
+objective 1.1·10⁻⁵) into a binary, dwell-feasible schedule at objective
+3.3·10⁻⁸ with **zero delivery error** and all pressures within the
+40–70 bar bounds — in ~2 minutes end-to-end on open-source solvers
+(IPOPT + HiGHS). Sum-Up Rounding tracks the demand only by chattering:
+**102 switching events** across the three elements (the compressors flip
+at ~50 % duty) against the ADM's **7** — 93 % fewer switching actions at
+~180× lower objective:
 
 ![GasLib-11 penalty ADM solution](assets/gaslib11_adm.png)
 
-(The single-step flips at the very end of the horizon are the
-end-of-horizon convention: terminal blocks are exempt from the min-up
-check, as in real-world transient gas control models.) Known performance
-caveat: the tCOMB MILPs at nt = 121 cost ~20 min total on HiGHS; Gurobi
-closes that gap (`--milp-backend gurobi`).
+(The short blocks at the very end of the horizon are the end-of-horizon
+convention: terminal blocks are exempt from the min-up check, as in
+real-world transient gas control models.) Measured performance caveat:
+on the finer 2 h grid (Δt = 60 s, 960 binaries per projection MILP) the
+tCOMB solves exceed 1.5 h total on HiGHS — that grid needs the Gurobi
+backend (`--milp-backend gurobi`) or a `time_budget`.
 
 ## Engineering
 
