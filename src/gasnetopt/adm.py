@@ -114,10 +114,30 @@ def _config_multipliers(v_ref: np.ndarray, r: np.ndarray) -> np.ndarray:
     return matches.astype(float)
 
 
+def _assert_feasible(ocp_model: OCModel, w: np.ndarray, p: np.ndarray,
+                     tol: float = 1e-6) -> None:
+    '''Verify the NLP constraint residuals of w. An unsuccessful IPOPT
+    status in a reoptimization only triggers a warning (the iterate is used
+    as an objective probe); the *returned* solution must never be an
+    unverified infeasible point.'''
+    nlp = ocp_model.nlp
+    args = ([nlp['x'], nlp['p']], [nlp['g']]) if 'p' in nlp \
+        else ([nlp['x']], [nlp['g']])
+    g_fun = cas.Function('g', *args)
+    gval = np.array(g_fun(w, p) if 'p' in nlp else g_fun(w)).flatten()
+    viol = np.maximum(np.array(ocp_model.lbg) - gval,
+                      gval - np.array(ocp_model.ubg)).max()
+    if viol > tol:
+        raise RuntimeError(
+            'Final reoptimization is infeasible (max constraint violation '
+            '{:.3e} > {:.0e}); no feasible point to return.'.format(
+                viol, tol))
+
+
 def miocp_adm(ocp_model: OCModel, tau_min: float = 0.01,
               with_CIAP: bool = True, online_plot=None,
               rho_values: np.ndarray | None = None,
-              max_adm_iter: int = 100, epsilon: float = 1e-3,
+              max_adm_iter: int = 100, epsilon: float = 1e-4,
               milp_backend: str | None = None,
               time_budget: float | None = None) -> tuple:
     '''Penalty ADM for mixed-integer optimal control problems with additional
@@ -131,11 +151,19 @@ def miocp_adm(ocp_model: OCModel, tau_min: float = 0.01,
     schedule (the paper uses logspace(-3, 6)) can otherwise start with the
     penalty already dominant, locking the iteration onto the initial v_ref.
 
-    time_budget [s]: soft wall-clock limit. The current dwell-feasible
-    reference v_ref is a valid incumbent from the first iteration on; when
-    the budget is exhausted, the iteration stops and the incumbent is
-    returned with reoptimized continuous controls. The method never returns
-    nothing, and the returned switching schedule is always dwell-feasible.
+    epsilon is a termination tolerance *relative* to |Psi_POC| (the
+    criteria (i)/(ii) compare objectives whose magnitude is model-dependent;
+    an absolute tolerance would stop the alternation before the first tCOMB
+    update on models with small objectives).
+
+    time_budget [s]: soft wall-clock limit, checked between solver calls;
+    NLP solves are additionally capped by an IPOPT wall-time limit of the
+    full budget. The dwell-feasible reference v_ref is a valid incumbent
+    from the first projection on; when the budget is exhausted, the
+    iteration stops and the incumbent is returned with reoptimized
+    continuous controls. The guarantee assumes the budget admits one POC
+    solve, one projection MILP and one reoptimization; below that the
+    method raises instead of fabricating a result.
 
     Returns (y, u, beta, v_ref, nodes, obj_val, w, timings).'''
 
@@ -151,7 +179,11 @@ def miocp_adm(ocp_model: OCModel, tau_min: float = 0.01,
         return max(1., time_budget - (time.time() - t_start))
 
     nlp_solver_name = 'ipopt'
-    solver = ocp_model.create_NLP_solver(nlp_solver_name, tol=1e-8)
+    # each NLP solve gets at least 1 s (IPOPT rejects a zero wall limit),
+    # consistent with the floor in remaining_budget()
+    nlp_wall = max(time_budget, 1.) if time_budget is not None else None
+    solver = ocp_model.create_NLP_solver(nlp_solver_name, tol=1e-8,
+                                         max_wall_time=nlp_wall)
     v_ref = np.array([[1] + [0] * (ocp_model.nv_ref - 1)]
                      * (len(ocp_model.t) - 1))
 
@@ -173,6 +205,9 @@ def miocp_adm(ocp_model: OCModel, tau_min: float = 0.01,
     y, u, alpha, v, nodes = ocp_model.extract(w0)
     timings['poc_nlp'] += _nlp_wall_time(solver)
     Psi_poc = ocp_model.evaluate_objective(0., v_ref, w0)
+
+    # termination tolerance relative to the objective magnitude
+    eps_abs = epsilon * max(abs(Psi_poc), 1e-12)
 
     if with_CIAP:
         beta, wall_t = solve_ciap(ocp_model.t, alpha, strategy='SUR')
@@ -244,7 +279,7 @@ def miocp_adm(ocp_model: OCModel, tau_min: float = 0.01,
             Psi_lp_l = ocp_model.evaluate_objective(rho, v_ref, w0)
 
             # first termination criterion
-            if Psi_lp_l >= Psi_l_l - epsilon:
+            if Psi_lp_l >= Psi_l_l - eps_abs:
                 if online_plot is not None:
                     online_plot(ocp_model.t, rho, Psi_lp_l, y, alpha, beta,
                                 v_ref)
@@ -268,7 +303,7 @@ def miocp_adm(ocp_model: OCModel, tau_min: float = 0.01,
                             v_ref)
 
             # second termination criterion
-            if Psi_lp_lp >= Psi_lp_l - epsilon:
+            if Psi_lp_lp >= Psi_lp_l - eps_abs:
                 if Psi_lp_lp > Psi_lp_l:
                     v_ref = prev_v_ref
                 print(output.format(rho, Psi_l_l,
@@ -295,6 +330,7 @@ def miocp_adm(ocp_model: OCModel, tau_min: float = 0.01,
     y, u, alpha, v, nodes, w0, wall_t = resolve_with_fixed_controls(
         ocp_model, solver, w0.copy(), p, v_fix=v, alpha_fix=beta)
     timings['reopt_nlp'] += wall_t
+    _assert_feasible(ocp_model, w0, p)
     obj_val = ocp_model.evaluate_objective(0, v_ref, w0)
     print('\nFinal objective value: {:.10e}'.format(obj_val))
 

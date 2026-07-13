@@ -259,10 +259,14 @@ class OCModel:
         return set_NLP_vars(w, self.problem, self.degree, y, u, alpha, v, nodes)
 
     def create_NLP_solver(self, nlp_solver_name: str = 'ipopt',
-                          tol: float = 1e-13) -> cas.Function:
+                          tol: float = 1e-13,
+                          max_wall_time: float | None = None
+                          ) -> cas.Function:
         options: dict = {'print_time': False}
         if nlp_solver_name == 'ipopt':
             options['ipopt'] = {'tol': tol, 'print_level': 0}
+            if max_wall_time is not None:
+                options['ipopt']['max_wall_time'] = max_wall_time
         elif nlp_solver_name == 'blocksqp':
             options['opttol'] = tol
         return cas.nlpsol('solver', nlp_solver_name, self.nlp, options)

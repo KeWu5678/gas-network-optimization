@@ -10,12 +10,12 @@ results/
 *.bak
 *.dir
 
-# Third-party data (GasLib networks, TRR154 transient data) and docs
-# (reference papers + design notes); keep local, do not commit.
-# The project-own transmission-lines demand profiles stay tracked.
+# Third-party data (GasLib networks, TRR154 transient data) and reference
+# papers; keep local, do not commit. The project-own transmission-lines
+# demand profiles and design notes stay tracked.
 data/*
 !data/translines/
-docs/
+docs/references/
 
 # OS
 .DS_Store

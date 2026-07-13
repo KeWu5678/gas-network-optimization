@@ -451,15 +451,18 @@ def validate(net: GasNetwork,
             if nid not in net.nodes:
                 findings.append('.bcd node {}: not in the network'
                                 .format(nid))
-        # total source capacity must cover peak demand
+        # total source capacity must cover the peak of the *simultaneous*
+        # demand (summing per-sink maxima would reject valid instances
+        # whose sinks peak at different times)
         capacity = sum(n.flow_max for n in net.sources)
         t_all = np.unique(np.concatenate(
             [times for times, _ in bc.massflow.values()] or [np.zeros(1)]))
-        peak = sum(bc.demand(n.id, t_all).max() for n in net.sinks
-                   if n.id in bc.massflow)
+        total = sum((bc.demand(n.id, t_all) for n in net.sinks
+                     if n.id in bc.massflow), np.zeros_like(t_all))
+        peak = float(total.max()) if len(t_all) else 0.
         if np.isfinite(capacity) and peak > capacity:
-            findings.append('peak demand {:.1f} kg/s exceeds total source '
-                            'capacity {:.1f} kg/s (NLP would be '
-                            'infeasible)'.format(peak, capacity))
+            findings.append('peak simultaneous demand {:.1f} kg/s exceeds '
+                            'total source capacity {:.1f} kg/s (NLP would '
+                            'be infeasible)'.format(peak, capacity))
 
     return findings

@@ -274,6 +274,12 @@ def build_gas_nlp(net: gaslib_io.GasNetwork,
     # ------------------------------------------------------------------ #
     # pipe dynamics: explicit upwind advection + implicit friction (IMEX) #
     # ------------------------------------------------------------------ #
+    # strictly positive density inside every pipe cell: rho appears in the
+    # friction denominator, and the characteristic states carry no implicit
+    # positivity (their box bounds are infinite past the initial column)
+    rho_lo = max(0.5 * min(n.pressure_min for n in net.nodes.values())
+                 / p_ref, 1e-2)
+
     for pipe in net.pipes:
         dx = pipe.length / sca.L_ref / nx
         kappa = pipe.friction_factor() * sca.L_ref / (2. * pipe.diameter)
@@ -288,6 +294,7 @@ def build_gas_nlp(net: gaslib_io.GasNetwork,
             rho_new = 0.5 * (xp[:, k + 1] - xm[:, k + 1])
             fric = kappa * m_new * cas.sqrt(m_new ** 2 + eps_fric ** 2) \
                 / rho_new
+            add_le(rho_lo - rho_new)         # rho >= rho_lo > 0
 
             # xi_p: transport to the right, ghost value from left node
             ghost_p = mL[k] + rho_l[k]
@@ -344,9 +351,14 @@ def build_gas_nlp(net: gaslib_io.GasNetwork,
         dp_max = require_finite(
             (comp.pressure_out_max - comp.pressure_in_min) / p_ref,
             'pressureOutMax of compressor {}'.format(comp.id))
-        add_eq(node_pressure(comp.to_node) - node_pressure(comp.from_node)
-               - dp_comp[comp.id])           # p_out = p_in + dp
+        p_in = node_pressure(comp.from_node)
+        p_out = node_pressure(comp.to_node)
+        add_eq(p_out - p_in - dp_comp[comp.id])  # p_out = p_in + dp
         add_le(dp_comp[comp.id] - wc * dp_max)   # dp <= w dp_max
+        # operating-pressure window, binding only while the station runs:
+        # pressureInMin <= p_in, p_out <= pressureOutMax (big-M off-relief)
+        add_le(comp.pressure_in_min / p_ref - p_in - (1. - wc) * rho_span)
+        add_le(p_out - comp.pressure_out_max / p_ref - (1. - wc) * rho_span)
 
     # ------------------------------------------------------------------ #
     # node mass balances and objective                                    #

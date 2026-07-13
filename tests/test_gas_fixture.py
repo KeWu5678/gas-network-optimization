@@ -45,6 +45,22 @@ def test_validate_diagnoses_dirty_data():
     assert any('snk' in f and 'massflow' in f for f in findings)
 
 
+def test_validate_uses_simultaneous_peak():
+    'Sinks peaking at different times must not be summed as simultaneous.'
+    net, bc = tiny()
+    net.nodes['snk2'] = gaslib_io.Node(
+        id='snk2', type='sink', pressure_min=40e5, pressure_max=70e5)
+    net.pipes.append(gaslib_io.Pipe(
+        id='pipe2', from_node='mid', to_node='snk2', length=10e3,
+        diameter=0.5, roughness=5e-5))
+    # per-sink maxima sum to 120 kg/s > capacity (~65.4 kg/s), but the
+    # peaks are staggered: simultaneous total never exceeds 65 kg/s
+    t = np.array([0., 1800., 3600.])
+    bc.massflow['snk'] = (t, np.array([-60., -5., -5.]))
+    bc.massflow['snk2'] = (t, np.array([-5., -5., -60.]))
+    assert gaslib_io.validate(net, bc) == []
+
+
 def test_validate_detects_disconnected_node():
     net, bc = tiny()
     net.nodes['orphan'] = gaslib_io.Node(

@@ -37,8 +37,11 @@ Minimize demand-tracking error over a horizon subject to
 
 1. **Partial outer convexification (POC)** replaces the binary choice among
    the 2^s network configurations by convex multipliers α(t) with an SOS1
-   constraint — a smooth NLP (CasADi/IPOPT) whose solution is a lower
-   bound but fractional.
+   constraint — a smooth NLP (CasADi/IPOPT). Its solution is fractional
+   and serves as the reference the binary methods are measured against;
+   the NLP is nonconvex, so the IPOPT solution is local and certifies no
+   global bound (on the gas instance the ADM in fact finds a better local
+   solution than the relaxation's).
 2. **Combinatorial integral approximation (CIAP)** rounds α to a binary
    schedule: Sum-Up Rounding (fast, chatters), an exact MILP, or the
    dwell-time-constrained MILP (`COMB`).
@@ -81,7 +84,7 @@ Two robustness measures beyond the paper (both documented in
 
 SUR chatters — 31 switches, infeasible for any real dwell requirement. The
 ADM variants deliver the best objectives **and** dwell-feasibility, within
-0.8 % of the (local) relaxation bound:
+0.8 % of the locally solved relaxation:
 
 ![Binary schedules per method](assets/translines_schedules.png)
 
@@ -110,16 +113,21 @@ constraints*, borrowing the structural signatures of production grid
 optimization:
 
 - **Never return nothing**: `miocp_adm(time_budget=...)` keeps a binary,
-  dwell-feasible incumbent from the first iteration and returns it (with
-  reoptimized continuous controls) when the wall-clock budget runs out;
-  MILP solves accept per-call `time_limit`s and return incumbents.
+  dwell-feasible incumbent from the first projection on and returns it
+  (with reoptimized continuous controls) when the wall-clock budget runs
+  out. The budget is soft — checked between solver calls, with NLP solves
+  additionally capped by an IPOPT wall-time limit and MILP solves by
+  per-call `time_limit`s that return incumbents; it assumes the budget
+  admits one relaxation solve, one projection and one reoptimization.
+  The returned point's constraint residuals are verified — a failed final
+  solve raises instead of reporting an unverified objective.
 - **Data validation as its own layer**: `gaslib_io.validate(net, bc)`
   diagnoses dirty data by name (missing bounds that would poison the NLP
   with 0·∞ = NaN, sinks without boundary data, disconnected nodes, demand
   exceeding supply capacity) before any solver runs.
 - **Determinism**: single-threaded solver settings, seeded tests, locked
-  dependencies (`uv.lock`), and a Docker image for bit-for-bit
-  reproducibility of the experiments.
+  dependencies (`uv.lock`), and a Docker image (pinned base images) that
+  reproduces the experiments in the locked environment.
 - **Quality gates in CI**: pytest (the gas code path is covered by a
   synthetic network fixture, so CI needs no third-party data), ruff, and
   mypy on every push.
@@ -131,7 +139,8 @@ data/
   translines/        demand profiles (tracked; the only data needed for CI)
   gaslib/            GasLib-11/-40 + TRR154 .bcd/.state (local, see Data)
 docs/
-  gas-network-design.md   model derivation & design decisions (local)
+  gas-network-design.md   model derivation & design decisions
+  references/             papers (local, not redistributed)
 examples/            runnable scripts: benchmarks, figures, results table
 src/gasnetopt/
   collocation.py     OCModel base (typed interface), collocation utilities
