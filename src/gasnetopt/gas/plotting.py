@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 from matplotlib.figure import Figure
 
 from .data import GasNetwork
@@ -36,10 +35,8 @@ def plot_solution(s: dict, title: str, path: Path,
 
     # delivery mismatch per sink
     ax = axes[n_sw]
-    err = 0.
     for i, sid in enumerate(s['sink_ids']):
         mis = s['delivered_kg_s'][sid] - s['demand_kg_s'][sid]
-        err = max(err, float(np.abs(mis).max()))
         ax.plot(tc, mis, color=GROUP_COLORS[i % len(GROUP_COLORS)],
                 linewidth=2, label=sid)
     ax.axhline(0., color='0.6', linewidth=1)
@@ -67,7 +64,7 @@ def plot_solution(s: dict, title: str, path: Path,
 
     if objective is not None:
         title = '{}   (objective {:.2e}, max delivery error {:.3g} kg/s)' \
-            .format(title, objective, err)
+            .format(title, objective, s['max_delivery_error_kg_s'])
     fig.suptitle(title)
     fig.tight_layout()
     fig.savefig(path, dpi=150)

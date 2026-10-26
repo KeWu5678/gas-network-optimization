@@ -6,7 +6,7 @@ In a hyperbolic PDE network (gas network,
 electricity network), controls (valves, compressor stations, transmission lines) are
 switched on/off over time — and every switch must not be activated too frequently, 
 otherwise the network suffers from **chattering**. 
-The proposed algorithm minimizes the chattering while perserves the optimality. 
+The proposed algorithm minimizes the chattering while preserving optimality. 
 
 ## The problem class
 
@@ -34,8 +34,7 @@ Minimize demand-tracking error over a horizon subject to **the gas networks** (s
    weight ρ — returning a binary, dwell-time-feasible schedule with
    reoptimized continuous controls.
 
-Two robustness measures beyond the paper (both documented in
-`docs/gas-network-design.md`):
+Two robustness measures beyond the paper:
 
 - the ρ **homotopy is auto-scaled** to the model's objective magnitude
   (ρ_crit = Ψ_POC/(T·n_switches)); a fixed schedule can silently lock the
@@ -49,7 +48,7 @@ Two robustness measures beyond the paper (both documented in
 |---|---|
 | NLP (POC relaxation, reoptimization) | CasADi + IPOPT, sparse AD |
 | MILP (CIAP, COMB, tCOMB) | solver-agnostic layer: HiGHS (default, via `scipy.optimize.milp`) or Gurobi (`gasnetopt[gurobi]`, warm starts) |
-| model interface | typed `OCModel` — algorithms interact with any model only through `extract` / `bounds` / `parameters` / `evaluate_objective` / grid `t` / encoding `r`; IPOPT behind one adapter (`nlp.py`: return status, wall time, exceptions) |
+| model interface | typed `OCModel` — algorithms interact with any model only through `create_solver` / `solve` / `bounds` / `parameters` / `extract` / `evaluate_objective` / `constraint_violation` / grid `t` / encoding `r`; IPOPT behind one adapter (`nlp.py`: return status, wall time, exceptions) |
 
 ## Results
 
@@ -57,13 +56,13 @@ Two robustness measures beyond the paper (both documented in
 
 | method | objective | switching events | dwell-feasible |
 |---|---|---|---|
-| POC relaxation | 14.964 | – | no (fractional) |
-| Sum-Up Rounding + reopt. | 15.257 | 31 | no |
-| COMB-CIAP (dwell MILP) | 15.137 | 10 | yes |
+| POC relaxation | 14.964 | - | no |
+| Sum-Up Rounding + reoptimization | 15.257 | 31 | no |
+| COMB-CIAP (dwell-time MILP) + reoptimization | 15.137 | 10 | yes |
 | penalty ADM | 15.082 | 6 | yes |
 | penalty ADM + CIAP | **15.077** | 9 | yes |
 
-(regenerate with `examples/make_results_table.py`)
+(regenerate with `uv run gasnetopt table results/translines_coarse`)
 
 SUR chatters — 31 switches, infeasible for any real dwell requirement. The
 ADM variants deliver the best objectives **and** dwell-feasibility, within
@@ -75,17 +74,18 @@ ADM variants deliver the best objectives **and** dwell-feasibility, within
 
 The penalty ADM turns the fractional POC relaxation (local solution,
 objective 1.1·10⁻⁵) into a binary, dwell-feasible schedule at objective
-3.3·10⁻⁸ with **zero delivery error** and all pressures within the
-40–70 bar bounds — in ~2 minutes end-to-end on open-source solvers
-(IPOPT + HiGHS). Sum-Up Rounding tracks the demand only by chattering:
-**102 switching events** across the three elements (the compressors flip
-at ~50 % duty) against the ADM's **7** — 93 % fewer switching actions at
-~180× lower objective:
+7.6·10⁻⁸ with a delivery error below 10⁻⁷ kg/s and all pressures within
+the 40–70 bar bounds — in under a minute end-to-end on open-source
+solvers (IPOPT + HiGHS). Sum-Up Rounding tracks the demand only by
+chattering: **113 switching events** across the three elements (each on
+50–57 % of the time) against the ADM's **3** — 97 % fewer switching
+actions at ~80× lower objective. The ADM keeps both compressors running
+and switches only the valve:
 
 ![GasLib-11 penalty ADM solution](assets/gaslib11_adm.png)
 
-(The short blocks at the very end of the horizon are the end-of-horizon
-convention: terminal blocks are exempt from the min-up check, as in
+(The short block at the very end of the horizon is the end-of-horizon
+convention: a terminal block is exempt from the min-up check, as in
 real-world transient gas control models.) Measured performance caveat:
 on the finer 2 h grid (Δt = 60 s, 960 binaries per projection MILP) the
 tCOMB solves exceed 1.5 h total on HiGHS — that grid needs the Gurobi
@@ -97,18 +97,17 @@ backend (`backend = "gurobi"` under `[milp]` in the config) or an
 ## Repository layout
 
 ```
-configs/             experiment settings (TOML), one file per benchmark
+configs/             one TOML file per experiment (see Quickstart)
 data/
   translines/        demand profiles (tracked)
   gaslib/            GasLib-11/-40 + TRR154 .bcd/.state (local, see Data)
-docs/
-  gas-network-design.md   model derivation & design decisions
-  references/             papers (local, not redistributed)
-examples/            thin entry scripts: config -> <application>.experiment
 src/gasnetopt/
+  cli.py             the `gasnetopt` command: run, present, table, topology
+  experiment.py      config -> application -> methods -> results/<config name>/
   core/              shared layer, knows no application
     ocmodel.py       OCModel: the interface both models implement
-    pipeline.py      POC, then the requested methods, one Solution each
+    pipeline.py      POC, then the requested methods; method labels and
+                     the results table
     adm.py           POC, rounding + reoptimization, penalty ADM, tCOMB,
                      time-budget fallback
     ciap.py          sum-up rounding, CIAP-MILP, dwell-time COMB
@@ -119,7 +118,7 @@ src/gasnetopt/
   gas/               transient gas networks (GasLib / TRR154)
     data.py          .net/.bcd/.state parsers + validation
     model.py         ISO2 gas NLP, GasOCModel
-    experiment.py    experiment schema, run
+    experiment.py    experiment schema, model build, report and figures
     plotting.py      solution and network figures
   translines/        telegraph-equation benchmark, same four modules
 ```
@@ -130,30 +129,33 @@ Requires [uv](https://docs.astral.sh/uv/):
 
 ```sh
 uv sync                      # locked environment (casadi/ipopt, numpy, scipy)
+uv sync --extra gurobi       # same, plus the optional Gurobi MILP backend
+                             # (a plain `uv sync` uninstalls it again)
 
-# transmission lines: POC + SUR (runs from the repo alone)
-uv run python examples/run_translines.py
-
-# full method benchmark + paper-style figures + results table
-uv run python examples/run_translines_adm.py configs/translines_coarse.toml
-uv run python examples/present_translines_results.py results/translines
-uv run python examples/make_results_table.py results/translines
+# transmission lines benchmark (runs from the repo alone)
+uv run gasnetopt run configs/translines_coarse.toml
+uv run gasnetopt present results/translines_coarse     # figures
+uv run gasnetopt table results/translines_coarse       # markdown table
 
 # gas network (needs GasLib data, see Data below)
-uv run python examples/run_gaslib11.py configs/gaslib11_1h.toml
+uv run gasnetopt run configs/gaslib11_1h.toml
+uv run gasnetopt topology configs/gaslib11_1h.toml     # network drawing
 ```
 
-Each run reads all of its settings (grid, dwell time, tolerances, MILP
-backend, output directory) from one TOML file in `configs/` and writes
-`config.toml`, `results.pkl` and its figures to the output directory. To
-change a setting, edit or copy the file; `--methods` picks the methods.
+An experiment is one TOML file in `configs/`: the application, the methods
+to run after the POC relaxation, and all settings (grid, dwell time,
+tolerances, MILP backend). `run configs/<name>.toml` writes
+`results/<name>/` with a copy of the config, `results.pkl`, `run.log` and
+the figures; `present` and `table` read that directory, and running its
+saved `config.toml` repeats the run in place. To change a setting, edit or
+copy the file.
 
 Or via Docker (same locked environment):
 
 ```sh
 docker build -t gasnetopt .
 docker run --rm -v "$PWD/results:/app/results" gasnetopt \
-    uv run python examples/run_translines.py
+    uv run gasnetopt run configs/translines_coarse.toml
 ```
 
 ## Data

@@ -25,7 +25,7 @@ from typing import Callable
 
 import numpy as np
 
-from .ciap import add_min_up_constraints, solve_ciap
+from .ciap import add_min_up_constraints, add_sos1_constraints, solve_ciap
 from .milp import MilpModel
 from .nlp import NlpSolveError, NlpSolver
 from .ocmodel import OCModel
@@ -63,13 +63,12 @@ def round_and_reoptimize(ocp_model: OCModel, solver: NlpSolver,
                          relaxed: Solution, strategy: str = 'SUR',
                          tau_min: float | None = None,
                          milp_backend: str | None = None) -> Solution:
-    beta, ciap_time = solve_ciap(ocp_model.t, relaxed.alpha,
-                                 strategy=strategy, tau_min=tau_min,
-                                 backend=milp_backend)
+    ciap = solve_ciap(ocp_model.t, relaxed.alpha, strategy=strategy,
+                      tau_min=tau_min, backend=milp_backend)
     sol = ocp_model.solve(solver, relaxed.w, ocp_model.parameters(),
-                          alpha_fix=beta)
+                          alpha_fix=ciap.beta)
     alpha, u, _ = ocp_model.extract(sol.w)
-    timings = {**relaxed.timings, 'ciap': ciap_time,
+    timings = {**relaxed.timings, 'ciap': ciap.wall_time,
                'reopt_nlp': sol.wall_time}
     return Solution(alpha=alpha, u=u,
                     objective=ocp_model.evaluate_objective(sol.w), w=sol.w,
@@ -147,26 +146,30 @@ class _PenaltyADM:
             tol=settings.nlp_tol, max_wall_time=budget.nlp_wall_limit)
         self._tcomb = TComb(ocp_model.t, ocp_model.r, tau_min,
                             backend=milp_backend)
-        self.timings = _timings()
-        self.rho = 0.
-        self.p = ocp_model.parameters()
+        self._timings = _timings()
+        self._rho = 0.
+        self._p = ocp_model.parameters()
 
         poc = solve_relaxation(ocp_model, self._solver)
-        self.timings['poc_nlp'] += poc.timings['poc_nlp']
-        self.psi_poc = poc.objective
-        self.w, self.u, self.alpha = poc.w, poc.u, poc.alpha
-        self.beta = self._round(self.alpha)
+        self._timings['poc_nlp'] += poc.timings['poc_nlp']
+        self._psi_poc = poc.objective
+        self._w, self._u, self._alpha = poc.w, poc.u, poc.alpha
+        self._beta = self._round(self._alpha)
         # data-driven initial combinatorial reference: dwell-feasible
         # projection of the POC schedule. v_ref is the incumbent from here
         # on: always binary, always dwell-feasible.
-        self.v_ref, _ = self._project(self.beta)
+        self._v_ref = self._project(self._beta).v_ref
+
+    @property
+    def psi_poc(self) -> float:
+        return self._psi_poc
 
     def forward_simulate(self, rho: float) -> float:
         # reoptimization with u and beta fixed, to obtain correct Psi_l_l
-        self.rho = rho
-        self.p = self._model.parameters(rho, self.v_ref)
-        self._reoptimize(u_fix=self.u, alpha_fix=self.beta)
-        return self._model.evaluate_objective(self.w, rho, self.v_ref)
+        self._rho = rho
+        self._p = self._model.parameters(rho, self._v_ref)
+        self._reoptimize(u_fix=self._u, alpha_fix=self._beta)
+        return self._model.evaluate_objective(self._w, rho, self._v_ref)
 
     def alternate(self, psi_l_l: float, max_iter: int,
                   eps_abs: float) -> None:
@@ -178,32 +181,33 @@ class _PenaltyADM:
             # first termination criterion
             if psi_lp_l >= psi_l_l - eps_abs:
                 self._plot(psi_lp_l)
-                self._progress.row(self.rho, psi_l_l, psi_lp_l,
+                self._progress.row(self._rho, psi_l_l, psi_lp_l,
                                    termination='(i)')
                 return
 
-            previous_v_ref = self.v_ref
-            self.v_ref, l1_distance = self._project(self.beta)
+            previous_v_ref = self._v_ref
+            projection = self._project(self._beta)
+            self._v_ref = projection.v_ref
             # objective Psi(u^{k,l+1}, v^{k,l+1}, vtilde^{k,l+1})
-            psi_lp_lp = self._model.evaluate_objective(self.w, self.rho,
-                                                       self.v_ref)
+            psi_lp_lp = self._model.evaluate_objective(self._w, self._rho,
+                                                       self._v_ref)
             self._plot(psi_lp_lp)
 
             # second termination criterion
             if psi_lp_lp >= psi_lp_l - eps_abs:
                 if psi_lp_lp > psi_lp_l:
-                    self.v_ref = previous_v_ref
-                self._progress.row(self.rho, psi_l_l, psi_lp_l, psi_lp_lp,
-                                   l1_distance, '(ii)')
+                    self._v_ref = previous_v_ref
+                self._progress.row(self._rho, psi_l_l, psi_lp_l, psi_lp_lp,
+                                   projection.l1_distance, '(ii)')
                 return
 
             psi_l_l = psi_lp_lp
-            self._progress.row(self.rho, psi_l_l, psi_lp_l, psi_lp_lp,
-                               l1_distance)
+            self._progress.row(self._rho, psi_l_l, psi_lp_l, psi_lp_lp,
+                               projection.l1_distance)
 
     def penalty_converged(self) -> bool:
-        return bool(np.linalg.norm(self.alpha.dot(self._model.r)
-                                   - self.v_ref, np.inf)
+        return bool(np.linalg.norm(self._alpha.dot(self._model.r)
+                                   - self._v_ref, np.inf)
                     < self._settings.convergence_tol)
 
     def reoptimize_incumbent(self) -> Solution:
@@ -211,54 +215,53 @@ class _PenaltyADM:
         # rounding beta) guarantees the returned schedule is exactly the
         # dwell-feasible incumbent, also when the loop was cut short by the
         # time budget.
-        beta = _config_multipliers(self.v_ref, self._model.r)
+        beta = _config_multipliers(self._v_ref, self._model.r)
         lbx, ubx = self._model.bounds(alpha_fix=beta)
         try:
-            sol = self._solver.solve(self.w, lbx, ubx, p=self.p)
+            sol = self._solver.solve(self._w, lbx, ubx, p=self._p)
         except NlpSolveError as err:
             raise RuntimeError(
                 'Final reoptimization failed with status "{}"; no feasible '
                 'point to return.'.format(err.solution.status)) from err
-        self.timings['reopt_nlp'] += sol.wall_time
-        _assert_feasible(self._model, sol.w, self.p, lbx, ubx,
+        self._timings['reopt_nlp'] += sol.wall_time
+        _assert_feasible(self._model, sol.w, self._p, lbx, ubx,
                          tol=self._settings.feasibility_tol)
         objective = self._model.evaluate_objective(sol.w)
         print('\nFinal objective value: {:.10e}'.format(objective),
               flush=True)
         alpha, u, y = self._model.extract(sol.w)
         if self._online_plot is not None:
-            self._online_plot(self._model.t, self.rho, objective, y, alpha,
-                              beta, self.v_ref)
+            self._online_plot(self._model.t, self._rho, objective, y, alpha,
+                              beta, self._v_ref)
         return Solution(alpha=beta, u=u, objective=objective, w=sol.w,
-                        timings=self.timings)
+                        timings=self._timings)
 
     def _relaxed_step(self) -> float:
         # solve POC relaxation for (y, u, alpha) at given v_ref
-        self.p = self._model.parameters(self.rho, self.v_ref)
-        sol = self._model.solve(self._solver, self.w, self.p)
-        self.timings['poc_nlp'] += sol.wall_time
-        self.w = sol.w
-        self.alpha, self.u, _ = self._model.extract(sol.w)
+        self._p = self._model.parameters(self._rho, self._v_ref)
+        sol = self._model.solve(self._solver, self._w, self._p)
+        self._timings['poc_nlp'] += sol.wall_time
+        self._w = sol.w
+        self._alpha, self._u, _ = self._model.extract(sol.w)
+        self._beta = self._round(self._alpha)
         if self._with_ciap:
-            self.beta = self._round(self.alpha)
-            self._reoptimize(alpha_fix=self.beta)
-        else:
-            self.beta = self.alpha
+            self._reoptimize(alpha_fix=self._beta)
         # objective Psi(u^{k,l+1}, v^{k,l+1}, vtilde^{k,l})
-        return self._model.evaluate_objective(self.w, self.rho, self.v_ref)
+        return self._model.evaluate_objective(self._w, self._rho, self._v_ref)
 
     def _round(self, alpha: np.ndarray) -> np.ndarray:
+        # without CIAP, tCOMB projects the relaxed multipliers directly
         if not self._with_ciap:
             return alpha
-        beta, wall_time = solve_ciap(self._model.t, alpha, strategy='SUR')
-        self.timings['ciap'] += wall_time
-        return beta
+        ciap = solve_ciap(self._model.t, alpha, strategy='SUR')
+        self._timings['ciap'] += ciap.wall_time
+        return ciap.beta
 
-    def _project(self, beta: np.ndarray) -> tuple[np.ndarray, float]:
-        v_ref, l1_distance, wall_time = self._tcomb.project(
+    def _project(self, beta: np.ndarray) -> Projection:
+        projection = self._tcomb.project(
             beta.dot(self._model.r), time_limit=self._budget.remaining())
-        self.timings['tcomb'] += wall_time
-        return v_ref, l1_distance
+        self._timings['tcomb'] += projection.wall_time
+        return projection
 
     def _reoptimize(self, u_fix: np.ndarray | None = None,
                     alpha_fix: np.ndarray | None = None) -> None:
@@ -266,22 +269,22 @@ class _PenaltyADM:
         # wall-time limit) is not fatal: the iteration continues from its
         # last iterate, and only the final point must be feasible.
         try:
-            sol = self._model.solve(self._solver, self.w, self.p,
+            sol = self._model.solve(self._solver, self._w, self._p,
                                     u_fix=u_fix, alpha_fix=alpha_fix)
         except NlpSolveError as err:
             print('Warning: reoptimization NLP returned "{}"'.format(
                 err.solution.status))
             sol = err.solution
-        self.timings['reopt_nlp'] += sol.wall_time
-        self.w = sol.w
+        self._timings['reopt_nlp'] += sol.wall_time
+        self._w = sol.w
         fixed = self._model.extract(sol.w)
-        self.u, self.beta = fixed.u, fixed.alpha
+        self._u, self._beta = fixed.u, fixed.alpha
 
     def _plot(self, psi: float) -> None:
         if self._online_plot is not None:
-            self._online_plot(self._model.t, self.rho, psi,
-                              self._model.extract(self.w).y, self.alpha,
-                              self.beta, self.v_ref)
+            self._online_plot(self._model.t, self._rho, psi,
+                              self._model.extract(self._w).y, self._alpha,
+                              self._beta, self._v_ref)
 
 
 class TComb:
@@ -295,10 +298,7 @@ class TComb:
         m = MilpModel('tCOMB')
         x = m.add_vars((n_steps, n_configs), binary=True)
         add_min_up_constraints(m, x, t, tau_min)
-        # exactly one configuration active per time step
-        for k in range(n_steps):
-            m.add_constr({int(x[k, i]): 1. for i in range(n_configs)},
-                         lb=1., ub=1.)
+        add_sos1_constraints(m, x)
         self._t = t
         self._r = r
         self._model = m
@@ -306,14 +306,21 @@ class TComb:
         self._backend = backend
 
     def project(self, v: np.ndarray, time_limit: float | None = None
-                ) -> tuple[np.ndarray, float, float]:
+                ) -> Projection:
         hk = np.diff(self._t)[:, None]
         cost = hk * np.abs(v[:, None, :] - self._r[None, :, :]).sum(axis=2)
         self._model.set_objective(self._x.reshape(-1), cost.reshape(-1))
-        sol, l1_distance, wall_time = self._model.solve(
-            backend=self._backend, time_limit=time_limit)
-        configs = np.round(sol[self._x.reshape(-1)]).reshape(self._x.shape)
-        return configs.dot(self._r), l1_distance, wall_time
+        sol = self._model.solve(backend=self._backend, time_limit=time_limit)
+        configs = np.round(sol.x[self._x.reshape(-1)]).reshape(self._x.shape)
+        return Projection(v_ref=configs.dot(self._r),
+                          l1_distance=sol.objective, wall_time=sol.wall_time)
+
+
+@dataclass(frozen=True)
+class Projection:
+    v_ref: np.ndarray               # binary, dwell-feasible
+    l1_distance: float              # to the projected v
+    wall_time: float
 
 
 def _default_rho_schedule(ocp_model: OCModel, psi_poc: float) -> np.ndarray:

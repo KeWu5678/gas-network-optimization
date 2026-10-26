@@ -14,11 +14,19 @@ The backend is selected per call.
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 
 import numpy as np
 from scipy import sparse
 
 BACKENDS = ('highs', 'gurobi')
+
+
+@dataclass(frozen=True)
+class MilpSolution:
+    x: np.ndarray
+    objective: float
+    wall_time: float
 
 
 class MilpModel:
@@ -27,7 +35,7 @@ class MilpModel:
     (used by tCOMB inside the ADM loop).'''
 
     def __init__(self, name: str = '') -> None:
-        self.name = name
+        self._name = name
         self._obj: list[float] = []
         self._lb: list[float] = []
         self._ub: list[float] = []
@@ -87,24 +95,22 @@ class MilpModel:
 
     def solve(self, backend: str | None = None,
               warm_start: np.ndarray | None = None,
-              time_limit: float | None = None
-              ) -> tuple[np.ndarray, float, float]:
-        '''Solve, return (x, obj_val, wall_time). warm_start is only used by
-        the gurobi backend (HiGHS via scipy has no warm-start interface).
-        With a time_limit [s], the best incumbent found within the limit is
-        returned (with a warning) instead of failing.'''
+              time_limit: float | None = None) -> MilpSolution:
+        '''warm_start is only used by the gurobi backend (HiGHS via scipy
+        has no warm-start interface). With a time_limit [s], the best
+        incumbent found within the limit is returned (with a warning)
+        instead of failing.'''
         backend = backend or 'highs'
         if backend == 'highs':
             if warm_start is not None:
                 print('Warning: MILP "{}": the HiGHS backend ignores the warm '
-                      'start'.format(self.name))
+                      'start'.format(self._name))
             return self._solve_highs(time_limit)
         if backend == 'gurobi':
             return self._solve_gurobi(warm_start, time_limit)
         raise ValueError('Unknown MILP backend "{}"'.format(backend))
 
-    def _solve_highs(self, time_limit: float | None = None
-                     ) -> tuple[np.ndarray, float, float]:
+    def _solve_highs(self, time_limit: float | None = None) -> MilpSolution:
         from scipy.optimize import Bounds, LinearConstraint, milp
         A = self._matrix()
         row_lb = np.array([r[1] for r in self._rows])
@@ -122,18 +128,17 @@ class MilpModel:
         if not res.success and res.status == 1 and res.x is not None:
             # hit the time/iteration limit with a feasible incumbent
             print('Warning: MILP "{}" returned incumbent at time limit'
-                  .format(self.name))
-            return res.x, res.fun, wall
+                  .format(self._name))
+            return MilpSolution(res.x, res.fun, wall)
         if not res.success:
             raise RuntimeError('MILP "{}" failed: {}'.format(
-                self.name, res.message))
-        return res.x, res.fun, wall
+                self._name, res.message))
+        return MilpSolution(res.x, res.fun, wall)
 
     def _solve_gurobi(self, warm_start: np.ndarray | None = None,
-                      time_limit: float | None = None
-                      ) -> tuple[np.ndarray, float, float]:
+                      time_limit: float | None = None) -> MilpSolution:
         import gurobipy as grb
-        m = grb.Model(self.name)
+        m = grb.Model(self._name)
         m.setParam('LogToConsole', 0)
         m.setParam('Threads', 1)      # determinism over speed
         if time_limit is not None:
@@ -158,9 +163,9 @@ class MilpModel:
         m.optimize()
         if m.status == grb.GRB.Status.TIME_LIMIT and m.SolCount > 0:
             print('Warning: MILP "{}" returned incumbent at time limit'
-                  .format(self.name))
+                  .format(self._name))
         elif m.status != grb.GRB.Status.OPTIMAL:
             raise RuntimeError('MILP "{}" failed (gurobi status {})'.format(
-                self.name, m.status))
+                self._name, m.status))
         sol = np.array([x[i].X for i in range(n)])
-        return sol, m.ObjVal, m.Runtime
+        return MilpSolution(sol, m.ObjVal, m.Runtime)

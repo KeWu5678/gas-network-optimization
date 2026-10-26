@@ -74,19 +74,23 @@ class GasOCModel(OCModel):
                  initial_state=None) -> None:
         gas = build_gas_nlp(net, bc, settings, initial_state)
         super().__init__(gas.problem, t=gas.t, r=gas.r,
-                         n_controls=len(gas.source_ids))
+                         n_controls=len(gas.source_ids),
+                         time_unit=gas.scaling.T_ref)
+        self._network = net
         self._gas = gas
-        self.scaling = gas.scaling
-        self.t_sec = gas.t_sec
         self._delivered = cas.Function(
             'delivered', [gas.problem.x],
             [gas.delivered[sid] for sid in gas.sink_ids])
+
+    @property
+    def network(self) -> data.GasNetwork:
+        return self._network
 
     def solution_dict(self, w: np.ndarray) -> dict:
         '''Physical-unit solution arrays: pressures [bar], mass flows [kg/s],
         switch states, deliveries and demands per sink.'''
         gas = self._gas
-        sca = self.scaling
+        sca = gas.scaling
         w = np.asarray(w).flatten()
         alpha, u, _ = self.extract(w)
         to_bar = sca.p_ref / 1e5
@@ -108,8 +112,12 @@ class GasOCModel(OCModel):
         delivered = self._delivered(w)
         if len(gas.sink_ids) == 1:
             delivered = [delivered]
+        delivered_kg_s = {sid: np.array(val).flatten() * sca.Q_ref
+                          for sid, val in zip(gas.sink_ids, delivered)}
+        demand_kg_s = {sid: gas.demand[sid] * sca.Q_ref
+                       for sid in gas.sink_ids}
         return {
-            't': self.t_sec,
+            't': gas.t_sec,
             'alpha': alpha,
             'switch_state': alpha.dot(self.r),
             'switch_ids': gas.switch_ids,
@@ -123,11 +131,11 @@ class GasOCModel(OCModel):
             'compressor_dp_bar': family('compressor_dp', to_bar),
             'pipe_mass_flux': pipe_mass_flux,
             'pipe_pressure_bar': pipe_pressure,
-            'delivered_kg_s': {
-                sid: np.array(val).flatten() * sca.Q_ref
-                for sid, val in zip(gas.sink_ids, delivered)},
-            'demand_kg_s': {sid: gas.demand[sid] * sca.Q_ref
-                            for sid in gas.sink_ids},
+            'delivered_kg_s': delivered_kg_s,
+            'demand_kg_s': demand_kg_s,
+            'max_delivery_error_kg_s': max(
+                float(np.abs(delivered_kg_s[sid] - demand_kg_s[sid]).max())
+                for sid in gas.sink_ids),
         }
 
     def _variable(self, w: np.ndarray, name: str) -> np.ndarray:
@@ -149,10 +157,7 @@ def build_gas_nlp(net: data.GasNetwork,
     Returns the NLP with the data needed to interpret its solution.'''
     T, nt, nx = settings.horizon, settings.nt, settings.nx
     p_ref = settings.p_ref
-    missing = data.missing_big_m_bounds(net)
-    if missing:
-        raise ValueError('big-M bounds missing in the .net file: '
-                         + '; '.join(missing))
+    data.validate_big_m_bounds(net)
     sca = GasScaling(c=bc.speed_of_sound, p_ref=p_ref,
                      L_ref=max(pipe.length for pipe in net.pipes),
                      A_ref=float(np.mean([pipe.area for pipe in net.pipes])))

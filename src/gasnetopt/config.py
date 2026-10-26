@@ -9,10 +9,12 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from . import REPO_ROOT
+from .core.adm import AdmSettings
 from .core.milp import BACKENDS
+from .core.pipeline import check_methods
 
-# sections shared by every experiment; each application defines its
-# experiment schema from these and its own [data] and [model] sections
+# sections shared by every experiment; each application extends Experiment
+# by its own [data] and [model] sections
 
 
 @dataclass(frozen=True)
@@ -36,25 +38,48 @@ class MilpSettings:
 
 
 @dataclass(frozen=True)
-class Output:
-    dir: Path
+class Experiment:
+    application: str                # selects the schema, see experiment.py
+    methods: tuple[str, ...]        # run after the POC relaxation
+    switching: Switching
+    nlp: NlpSettings
+    adm: AdmSettings
+    milp: MilpSettings
+
+    def __post_init__(self) -> None:
+        check_methods(self.methods)
 
 
 class ConfigError(ValueError):
     pass
 
 
-Experiment = TypeVar('Experiment')
+# name of the config copy in the output directory of a run
+SAVED_CONFIG = 'config.toml'
 
 
-def load(path: str | Path, schema: type[Experiment]) -> Experiment:
+Schema = TypeVar('Schema')
+
+
+def read(path: str | Path) -> dict[str, Any]:
     with open(path, 'rb') as f:
-        return _build(schema, tomllib.load(f), section='')
+        try:
+            return tomllib.load(f)
+        except tomllib.TOMLDecodeError as err:
+            raise ConfigError('invalid TOML: {}'.format(err)) from err
+
+
+def build(schema: type[Schema], table: dict[str, Any]) -> Schema:
+    return _build(schema, table, section='')
 
 
 def copy_to_output(path: str | Path, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    return Path(shutil.copyfile(path, output_dir / 'config.toml'))
+    target = output_dir / SAVED_CONFIG
+    # a rerun of the saved config itself finds it in place already
+    if not (target.exists() and target.samefile(path)):
+        shutil.copyfile(path, target)
+    return target
 
 
 def _build(schema: Any, table: Any, section: str) -> Any:

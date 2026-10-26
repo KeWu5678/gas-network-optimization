@@ -12,10 +12,14 @@ from .nlp import NlpProblem, NlpSolution, NlpSolver
 class OCModel:
 
     def __init__(self, problem: NlpProblem, t: np.ndarray, r: np.ndarray,
-                 n_controls: int, objective_scale: float = 1.) -> None:
-        self.t = t
-        self.r = r
+                 n_controls: int, objective_scale: float = 1.,
+                 time_unit: float = 1.) -> None:
+        # t: model time grid, r: configuration encoding (n_configs,
+        # n_switches), time_unit: application time per model time unit
+        self._t = t
+        self._r = r
         self._n_controls = n_controls
+        self._time_unit = time_unit
         rho = cas.MX.sym('rho')
         V_ref = cas.MX.sym('V_ref', self.n_switches, len(t) - 1)
         p = cas.vertcat(rho, cas.vec(V_ref))
@@ -26,6 +30,14 @@ class OCModel:
         self._problem = replace(problem, f=f, p=p)
         self._objective = cas.Function('objective', [problem.x, p], [f])
         self._constraints = cas.Function('g', [problem.x, p], [problem.g])
+
+    @property
+    def t(self) -> np.ndarray:
+        return self._t
+
+    @property
+    def r(self) -> np.ndarray:
+        return self._r
 
     @property
     def n_configs(self) -> int:
@@ -51,7 +63,10 @@ class OCModel:
     def w0(self) -> np.ndarray:
         return self._problem.x0.copy()
 
-    def create_solver(self, tol: float = 1e-13,
+    def to_model_time(self, duration: float) -> float:
+        return duration / self._time_unit
+
+    def create_solver(self, tol: float,
                       max_wall_time: float | None = None) -> NlpSolver:
         return NlpSolver(self._problem, tol=tol, max_wall_time=max_wall_time)
 

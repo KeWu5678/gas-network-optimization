@@ -50,24 +50,30 @@ class TranslinesOCModel(OCModel):
                 'demand has shape {}, the {} grid needs {} (consumers x '
                 'time steps)'.format(demand.shape, settings.grid,
                                      (len(network.consumers), nt - 1)))
-        self.network = network
-        self.demand = demand
-        self.T = HORIZON
-        self.nt = nt
-        self.nx = nx
+        self._network = network
+        self._demand = demand
+        self._nx = nx
         problem = translines_nlp(network, demand, HORIZON, nt=nt, nx=nx)
         super().__init__(problem, t=np.linspace(0, HORIZON, nt),
                          r=network.switch_encoding(),
                          n_controls=len(network.producers),
                          objective_scale=1e-3)
 
+    @property
+    def network(self) -> TranslinesNetwork:
+        return self._network
+
+    @property
+    def demand(self) -> np.ndarray:
+        return self._demand
+
     def solution_dict(self, w: np.ndarray) -> dict:
         alpha, u, y = self.extract(np.asarray(w).flatten())
-        n_cells = self.nx * self.nt
+        nt, nx = len(self.t), self._nx
         # y holds xi_p, xi_m of every line in turn, each (nx, nt) column-major
-        xi = [np.reshape(y[k * n_cells:(k + 1) * n_cells], (self.nx, self.nt),
+        xi = [np.reshape(y[k * nx * nt:(k + 1) * nx * nt], (nx, nt),
                          order='F')
-              for k in range(2 * len(self.network.edges))]
+              for k in range(2 * len(self._network.edges))]
         return {
             't': self.t,
             'alpha': alpha,
@@ -75,14 +81,14 @@ class TranslinesOCModel(OCModel):
             'u': u,
             'xi_p': xi[0::2],
             'xi_m': xi[1::2],
-            'demand': self.demand,
+            'demand': self._demand,
         }
 
 
 def translines_nlp(network: TranslinesNetwork, demand: np.ndarray,
-                   T: float = 15., lr: float = 1., L: float = 1.,
-                   C: float = 1., R: float = 1e-3, G: float = 2e-3,
-                   nx: int = 10, nt: int = 151) -> NlpProblem:
+                   T: float, nt: int, nx: int, lr: float = 1., L: float = 1.,
+                   C: float = 1., R: float = 1e-3,
+                   G: float = 2e-3) -> NlpProblem:
     'Compose NLP from network and other data'
     dx = lr / nx
     dt = T / (nt - 1)

@@ -3,6 +3,7 @@ import pytest
 
 from gasnetopt.core.adm import TComb
 from gasnetopt.core.ciap import solve_ciap, sum_up_rounding
+from gasnetopt.core.pipeline import switching_events
 
 
 def accumulated_deviation(t, alpha, beta):
@@ -43,8 +44,8 @@ def test_sur_sos1(relaxed_instance):
 
 def test_mip_ciap_not_worse_than_sur(relaxed_instance):
     t, alpha = relaxed_instance
-    p_sur, _ = solve_ciap(t, alpha, strategy='SUR')
-    p_mip, _ = solve_ciap(t, alpha, strategy='MIP')
+    p_sur = solve_ciap(t, alpha, strategy='SUR').beta
+    p_mip = solve_ciap(t, alpha, strategy='MIP').beta
     assert np.all(p_mip.sum(axis=1) == 1)
     eta_sur = accumulated_deviation(t, alpha, p_sur)
     eta_mip = accumulated_deviation(t, alpha, p_mip)
@@ -54,7 +55,7 @@ def test_mip_ciap_not_worse_than_sur(relaxed_instance):
 def test_comb_respects_dwell_time(relaxed_instance):
     t, alpha = relaxed_instance
     tau_min = 1.5  # = 3 steps of dt = 0.5
-    beta, _ = solve_ciap(t, alpha, strategy='COMB', tau_min=tau_min)
+    beta = solve_ciap(t, alpha, strategy='COMB', tau_min=tau_min).beta
     assert np.all(beta.sum(axis=1) == 1)
     N = len(t)
     for mode in range(alpha.shape[1]):
@@ -76,6 +77,11 @@ def test_tcomb_returns_feasible_input_unchanged():
     v = np.zeros((N - 1, n_configs))
     v[:4, 0] = 1.
     v[4:, 2] = 1.
-    v_proj, distance, _ = TComb(t, r, tau_min=1.0).project(v)
-    assert np.allclose(v_proj, v)
-    assert distance <= 1e-9
+    projection = TComb(t, r, tau_min=1.0).project(v)
+    assert np.allclose(projection.v_ref, v)
+    assert projection.l1_distance <= 1e-9
+
+
+def test_switching_events_count_changes_per_switch():
+    switch_state = np.array([[0, 1], [1, 1], [1, 0], [0, 0.9999]])
+    assert np.array_equal(switching_events(switch_state), [2, 2])

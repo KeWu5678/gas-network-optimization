@@ -37,16 +37,22 @@ def test_parse_tiny_fixture():
 
 def test_validate_clean_fixture():
     net, bc = tiny()
-    assert data.validate(net, bc) == []
+    data.validate(net, bc)
+
+
+def findings(net, bc):
+    with pytest.raises(data.InvalidDataError) as err:
+        data.validate(net, bc)
+    return err.value.findings
 
 
 def test_validate_diagnoses_dirty_data():
     net, bc = tiny()
     net.compressors[0].pressure_out_max = np.inf   # missing bound -> big-M
     del bc.massflow['snk']                         # sink without demand data
-    findings = data.validate(net, bc)
-    assert any('pressureOutMax' in f for f in findings)
-    assert any('snk' in f and 'massflow' in f for f in findings)
+    found = findings(net, bc)
+    assert any('pressureOutMax' in f for f in found)
+    assert any('snk' in f and 'massflow' in f for f in found)
 
 
 def test_validate_uses_simultaneous_peak():
@@ -62,15 +68,22 @@ def test_validate_uses_simultaneous_peak():
     t = np.array([0., 1800., 3600.])
     bc.massflow['snk'] = (t, np.array([-60., -5., -5.]))
     bc.massflow['snk2'] = (t, np.array([-5., -5., -60.]))
-    assert data.validate(net, bc) == []
+    data.validate(net, bc)
 
 
 def test_validate_detects_disconnected_node():
     net, bc = tiny()
     net.nodes['orphan'] = data.Node(
         id='orphan', type='innode', pressure_min=40e5, pressure_max=70e5)
-    findings = data.validate(net, bc)
-    assert any('orphan' in f and 'not connected' in f for f in findings)
+    assert any('orphan' in f and 'not connected' in f
+               for f in findings(net, bc))
+
+
+def test_model_build_rejects_missing_big_m_bound():
+    net, bc = tiny()
+    net.valves.append(data.Valve(id='v', from_node='src', to_node='mid'))
+    with pytest.raises(data.InvalidDataError, match='flowMax missing'):
+        GasOCModel(net, bc, TEN_MINUTES)
 
 
 def test_poc_solves_on_fixture():
@@ -118,7 +131,7 @@ def test_adm_time_budget_returns_dwell_feasible_incumbent():
     'Exhausted budget must still return a binary dwell-feasible schedule.'
     net, bc = tiny()
     model = GasOCModel(net, bc, TEN_MINUTES)
-    tau = 120. / model.scaling.T_ref
+    tau = model.to_model_time(120.)
     result = adm.miocp_adm(model, tau, with_ciap=True,
                            settings=AdmSettings(time_budget=0.))
     assert_binary_dwell_feasible(model, result.alpha, tau)
@@ -130,7 +143,7 @@ def test_adm_returns_dwell_feasible_schedule():
     # the macOS and Linux builds), so check what the method guarantees
     net, bc = tiny()
     model = GasOCModel(net, bc, TEN_MINUTES)
-    tau = 120. / model.scaling.T_ref
+    tau = model.to_model_time(120.)
     result = adm.miocp_adm(model, tau, with_ciap=True)
     assert_binary_dwell_feasible(model, result.alpha, tau)
     assert 0. <= result.objective < np.inf
