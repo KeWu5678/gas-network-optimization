@@ -17,5 +17,6 @@ networks (semilinear isothermal Euler equations, TRR154/GasLib data).
 
 from pathlib import Path
 
-#: Repository data directory (works for editable installs from the repo).
-DATA_DIR = Path(__file__).resolve().parents[2] / 'data'
+# repository layout (works for editable installs from the repo)
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DATA_DIR = REPO_ROOT / 'data'

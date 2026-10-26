@@ -1,0 +1,38 @@
+# GasLib-11 with the TRR154 sinus scenario, 1 h horizon (README benchmark).
+# Run: uv run python examples/run_gaslib11.py configs/gaslib11_1h.toml
+# Paths are relative to the repository root.
+
+[data]
+network = "data/gaslib/GasLib-11/GasLib-11-v1-20211130.net"
+boundary = "data/gaslib/GasLib-11/GasLib-11-sinus-InputData.bcd"
+
+[model]
+horizon = 3600.0          # s
+nt = 61                   # time grid points (dt = 60 s)
+nx = 2                    # cells per pipe
+p_ref = 50e5              # pressure scale [Pa]
+gamma_comp = 0.02         # weight of the compression cost
+eps_fric = 1e-3           # smoothing of |m| in the friction term
+# p_init = 53e5           # flat initial pressure [Pa]; default: first entry
+                          # pressure of the .bcd
+
+[switching]
+tau_min = 900.0           # minimal dwell time [s]
+
+[nlp]
+tol = 1e-6                # POC relaxation and SUR reoptimization
+
+[adm]
+max_iter = 100            # ADM iterations per penalty weight
+epsilon = 1e-4            # termination, relative to |Psi_POC|
+nlp_tol = 1e-8
+convergence_tol = 1e-4
+feasibility_tol = 1e-6
+# time_budget = 600.0     # wall clock [s]
+# rho_values = [1e-6, 1e-4, 1e-2]   # default: scaled to Psi_POC
+
+[milp]
+backend = "highs"         # or "gurobi"
+
+[output]
+dir = "results/gaslib11"

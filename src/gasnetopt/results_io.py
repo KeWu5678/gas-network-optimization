@@ -20,7 +20,7 @@ def save_results(path: str | Path, data: dict[str, Any]) -> Path:
 
 
 def load_results(path: str | Path) -> dict[str, Any]:
-    'Load dict of results from a pickle file.'`z
+    'Load dict of results from a pickle file.'
     path = Path(path).with_suffix('.pkl')
     with open(path, 'rb') as f:
         return pickle.load(f)

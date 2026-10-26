@@ -8,21 +8,17 @@ and solved with one of two backends:
 - 'highs' (default): HiGHS via scipy.optimize.milp, no extra dependency.
 - 'gurobi': gurobipy, if installed (optional extra ``gasnetopt[gurobi]``).
 
-The backend can be selected per call or globally via the environment variable
-``GASNETOPT_MILP_BACKEND``.
+The backend is selected per call.
 '''
 
 from __future__ import annotations
 
-import os
 import time
 
 import numpy as np
 from scipy import sparse
 
-
-def default_backend() -> str:
-    return os.environ.get('GASNETOPT_MILP_BACKEND', 'highs')
+BACKENDS = ('highs', 'gurobi')
 
 
 class MilpModel:
@@ -32,27 +28,27 @@ class MilpModel:
 
     def __init__(self, name: str = '') -> None:
         self.name = name
-        self.obj: list[float] = []
-        self.lb: list[float] = []
-        self.ub: list[float] = []
-        self.binary: list[bool] = []
+        self._obj: list[float] = []
+        self._lb: list[float] = []
+        self._ub: list[float] = []
+        self._binary: list[bool] = []
         # constraint rows: (dict col -> coeff, row lb, row ub)
-        self.rows: list[tuple[dict[int, float], float, float]] = []
+        self._rows: list[tuple[dict[int, float], float, float]] = []
         self._A = None  # cached sparse constraint matrix
 
     @property
     def ncols(self) -> int:
-        return len(self.obj)
+        return len(self._obj)
 
     def add_var(self, lb: float = 0., ub: float = np.inf,
                 obj: float = 0., binary: bool = False) -> int:
         'Add one variable, return its column index.'
         if binary:
             lb, ub = 0., 1.
-        self.obj.append(obj)
-        self.lb.append(lb)
-        self.ub.append(ub)
-        self.binary.append(binary)
+        self._obj.append(obj)
+        self._lb.append(lb)
+        self._ub.append(ub)
+        self._binary.append(binary)
         self._A = None
         return self.ncols - 1
 
@@ -68,25 +64,25 @@ class MilpModel:
                    lb: float = -np.inf, ub: float = np.inf) -> None:
         '''Add a row given as dict {col: coeff} with row bounds. Equality:
         lb == ub.'''
-        self.rows.append((dict(coeffs), lb, ub))
+        self._rows.append((dict(coeffs), lb, ub))
         self._A = None
 
     def set_objective(self, idx: np.ndarray, coeffs: np.ndarray) -> None:
         'Overwrite objective coefficients for columns idx (array-like).'
-        obj = np.asarray(self.obj, dtype=float)
+        obj = np.asarray(self._obj, dtype=float)
         obj[np.asarray(idx).reshape(-1)] = np.asarray(coeffs).reshape(-1)
-        self.obj = obj.tolist()
+        self._obj = obj.tolist()
 
     def _matrix(self) -> sparse.csr_matrix:
         if self._A is None:
             data, ri, ci = [], [], []
-            for r, (coeffs, _, _) in enumerate(self.rows):
+            for r, (coeffs, _, _) in enumerate(self._rows):
                 for c, v in coeffs.items():
                     ri.append(r)
                     ci.append(int(c))
                     data.append(float(v))
             self._A = sparse.csr_matrix(
-                (data, (ri, ci)), shape=(len(self.rows), self.ncols))
+                (data, (ri, ci)), shape=(len(self._rows), self.ncols))
         return self._A
 
     def solve(self, backend: str | None = None,
@@ -97,8 +93,11 @@ class MilpModel:
         the gurobi backend (HiGHS via scipy has no warm-start interface).
         With a time_limit [s], the best incumbent found within the limit is
         returned (with a warning) instead of failing.'''
-        backend = backend or default_backend()
+        backend = backend or 'highs'
         if backend == 'highs':
+            if warm_start is not None:
+                print('Warning: MILP "{}": the HiGHS backend ignores the warm '
+                      'start'.format(self.name))
             return self._solve_highs(time_limit)
         if backend == 'gurobi':
             return self._solve_gurobi(warm_start, time_limit)
@@ -108,15 +107,15 @@ class MilpModel:
                      ) -> tuple[np.ndarray, float, float]:
         from scipy.optimize import Bounds, LinearConstraint, milp
         A = self._matrix()
-        row_lb = np.array([r[1] for r in self.rows])
-        row_ub = np.array([r[2] for r in self.rows])
+        row_lb = np.array([r[1] for r in self._rows])
+        row_ub = np.array([r[2] for r in self._rows])
         options = {} if time_limit is None else {'time_limit': time_limit}
         t0 = time.time()
         res = milp(
-            c=np.asarray(self.obj),
+            c=np.asarray(self._obj),
             constraints=LinearConstraint(A, row_lb, row_ub),
-            bounds=Bounds(np.asarray(self.lb), np.asarray(self.ub)),
-            integrality=np.asarray(self.binary, dtype=int),
+            bounds=Bounds(np.asarray(self._lb), np.asarray(self._ub)),
+            integrality=np.asarray(self._binary, dtype=int),
             options=options,
         )
         wall = time.time() - t0
@@ -125,8 +124,9 @@ class MilpModel:
             print('Warning: MILP "{}" returned incumbent at time limit'
                   .format(self.name))
             return res.x, res.fun, wall
-        assert res.success, 'MILP "{}" failed: {}'.format(
-            self.name, res.message)
+        if not res.success:
+            raise RuntimeError('MILP "{}" failed: {}'.format(
+                self.name, res.message))
         return res.x, res.fun, wall
 
     def _solve_gurobi(self, warm_start: np.ndarray | None = None,
@@ -140,13 +140,13 @@ class MilpModel:
             m.setParam('TimeLimit', time_limit)
         n = self.ncols
         vtypes = [grb.GRB.BINARY if b else grb.GRB.CONTINUOUS
-                  for b in self.binary]
-        x = m.addVars(n, lb=self.lb, ub=self.ub, obj=self.obj)
+                  for b in self._binary]
+        x = m.addVars(range(n), lb=self._lb, ub=self._ub, obj=self._obj)
         for i in range(n):
             x[i].VType = vtypes[i]
-            if warm_start is not None and self.binary[i]:
+            if warm_start is not None and self._binary[i]:
                 x[i].Start = warm_start[i]
-        for coeffs, lb, ub in self.rows:
+        for coeffs, lb, ub in self._rows:
             expr = grb.quicksum(v * x[c] for c, v in coeffs.items())
             if lb == ub:
                 m.addConstr(expr == lb)
@@ -159,9 +159,8 @@ class MilpModel:
         if m.status == grb.GRB.Status.TIME_LIMIT and m.SolCount > 0:
             print('Warning: MILP "{}" returned incumbent at time limit'
                   .format(self.name))
-        else:
-            assert m.status == grb.GRB.Status.OPTIMAL, \
-                'MILP "{}" failed (gurobi status {})'.format(
-                    self.name, m.status)
+        elif m.status != grb.GRB.Status.OPTIMAL:
+            raise RuntimeError('MILP "{}" failed (gurobi status {})'.format(
+                self.name, m.status))
         sol = np.array([x[i].X for i in range(n)])
         return sol, m.ObjVal, m.Runtime

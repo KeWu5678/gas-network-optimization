@@ -1,14 +1,14 @@
-import casadi as cas
 import numpy as np
 import pytest
 
 from gasnetopt import DATA_DIR
-from gasnetopt.gas import gaslib_io
-from gasnetopt.gas.model import switch_encoding
-from gasnetopt.gas.ocmodel import GasOCModel
+from gasnetopt.core import adm
+from gasnetopt.gas import data
+from gasnetopt.gas.model import GasModelSettings, GasOCModel, switch_encoding
 
 G11 = DATA_DIR / 'gaslib' / 'GasLib-11'
 G40 = DATA_DIR / 'gaslib' / 'GasLib-40'
+HALF_HOUR = GasModelSettings(horizon=1800., nt=31, nx=2)
 
 # GasLib data is not redistributed with the repository (see README);
 # skip the gas tests when it has not been placed under data/gaslib.
@@ -18,12 +18,12 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope='module')
 def net():
-    return gaslib_io.parse_net(G11 / 'GasLib-11-v1-20211130.net')
+    return data.parse_net(G11 / 'GasLib-11-v1-20211130.net')
 
 
 @pytest.fixture(scope='module')
 def bc():
-    return gaslib_io.parse_bcd(G11 / 'GasLib-11-sinus-InputData.bcd')
+    return data.parse_bcd(G11 / 'GasLib-11-sinus-InputData.bcd')
 
 
 def test_parse_net_gaslib11(net):
@@ -54,7 +54,7 @@ def test_parse_state_gaslib40():
     state_file = G40 / 'GasLib-40-sinus_5000_60-initial.state'
     if not state_file.exists():
         pytest.skip('GasLib-40 state data not available')
-    st = gaslib_io.parse_state(state_file)
+    st = data.parse_state(state_file)
     assert len(st.pipe_profiles) == 39
     xs, qs, ps = st.pipe_profiles['pipe_1']
     assert xs[0] == 0. and len(xs) == len(qs) == len(ps)
@@ -69,16 +69,9 @@ def test_switch_encoding():
 
 @pytest.fixture(scope='module')
 def solved_model(net, bc):
-    model = GasOCModel(net, bc, T=1800., nt=31, nx=2)
-    solver = model.create_NLP_solver(tol=1e-6)
-    v_ref = np.array([[1] + [0] * (model.nv_ref - 1)]
-                     * (len(model.t) - 1))
-    p = np.concatenate(([0.], v_ref.flatten()))
-    sol = solver(x0=model.w0, p=p, lbx=model.lbw, ubx=model.ubw,
-                 lbg=model.lbg, ubg=model.ubg)
-    assert solver.stats()['return_status'] in [
-        'Solve_Succeeded', 'Solved_To_Acceptable_Level']
-    return model, sol['x'].full().flatten()
+    model = GasOCModel(net, bc, HALF_HOUR)
+    poc = adm.solve_relaxation(model, model.create_solver(tol=1e-6))
+    return model, poc.w
 
 
 def test_gas_poc_solves_and_is_physical(solved_model):
@@ -95,27 +88,21 @@ def test_gas_poc_solves_and_is_physical(solved_model):
     assert np.allclose(s['alpha'].sum(axis=1), 1., atol=1e-6)
 
 
-def test_gas_mass_balance_at_innodes(solved_model):
-    'Mass balance residual at inner nodes must vanish.'
+def test_gas_constraints_hold_at_solution(solved_model):
     model, w = solved_model
-    # residual of net_inflow was enforced == 0, so verify with the exact NLP
-    # constraint values (boundary flux variables equal cell values only up
-    # to O(dx), so a check on the extracted arrays would be approximate)
-    g_fun = cas.Function('g', [model.nlp['x']], [model.nlp['g']])
-    gval = np.array(g_fun(w)).flatten()
-    lbg = np.array(model.lbg)
-    ubg = np.array(model.ubg)
-    eq = lbg == ubg
-    assert np.abs(gval[eq] - lbg[eq]).max() < 1e-6
+    # verify with the exact NLP constraint values (boundary flux variables
+    # equal cell values only up to O(dx), so a check on the extracted
+    # arrays would be approximate)
+    assert model.constraint_violation(w, model.parameters()) < 1e-6
 
 
 def test_gas_extract_overwrite_roundtrip(net, bc):
-    model = GasOCModel(net, bc, T=1800., nt=31, nx=2)
-    w = np.array(model.w0, dtype=float).copy()
+    model = GasOCModel(net, bc, HALF_HOUR)
     rng = np.random.default_rng(1)
-    alpha = rng.random((model.nt - 1, model.n_confg))
-    u = rng.random((model.nt - 1, model.n_src))
-    w = model.overwrite(w, u=u, alpha=alpha)
-    y, u2, alpha2, _, _ = model.extract(w)
+    alpha = rng.random((len(model.t) - 1, model.n_configs))
+    u = rng.random((len(model.t) - 1, model.n_controls))
+    w = model.with_variables(model.w0, u=u, alpha=alpha)
+    alpha2, u2, y = model.extract(w)
     assert np.allclose(u2, u)
     assert np.allclose(alpha2, alpha)
+    assert np.array_equal(y, model.extract(model.w0).y)
