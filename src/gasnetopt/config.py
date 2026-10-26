@@ -54,6 +54,10 @@ class ConfigError(ValueError):
     pass
 
 
+# name of the config copy in the output directory of a run
+SAVED_CONFIG = 'config.toml'
+
+
 Schema = TypeVar('Schema')
 
 
@@ -71,7 +75,11 @@ def build(schema: type[Schema], table: dict[str, Any]) -> Schema:
 
 def copy_to_output(path: str | Path, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    return Path(shutil.copyfile(path, output_dir / 'config.toml'))
+    target = output_dir / SAVED_CONFIG
+    # a rerun of the saved config itself finds it in place already
+    if not (target.exists() and target.samefile(path)):
+        shutil.copyfile(path, target)
+    return target
 
 
 def _build(schema: Any, table: Any, section: str) -> Any:

@@ -5,7 +5,7 @@ import io
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable
 
 from . import REPO_ROOT, config, results_io
 from .config import ConfigError, Experiment
@@ -40,15 +40,21 @@ APPLICATIONS = {
 def run(config_path: str | Path) -> dict[str, Solution]:
     config_path = Path(config_path)
     application, cfg = load(config_path)
+    # build the model, and so validate the data, before replacing the files
+    # of an earlier run
+    build_output = io.StringIO()
+    with _teed(build_output):
+        model = application.build_model(cfg)
     out_dir = output_dir(config_path)
     config.copy_to_output(config_path, out_dir)
-    with _logged(out_dir / 'run.log'):
-        return _solve_and_record(application, cfg, out_dir)
+    with open(out_dir / 'run.log', 'w') as log, _teed(log):
+        log.write(build_output.getvalue())
+        return _solve_and_record(application, model, cfg, out_dir)
 
 
 def present(results_dir: str | Path, fmt: str = 'pdf') -> list[Path]:
     results_dir = Path(results_dir)
-    application, cfg = load(results_dir / 'config.toml')
+    application, cfg = load(results_dir / config.SAVED_CONFIG)
     solutions = _solutions(results_io.load_results(results_dir / 'results'))
     return application.present(application.build_model(cfg), solutions,
                                results_dir, fmt)
@@ -71,7 +77,7 @@ def load(config_path: str | Path) -> tuple[Application, Experiment]:
     try:
         entries = config.read(config_path)
         name = entries.get('application')
-        if name not in APPLICATIONS:
+        if not isinstance(name, str) or name not in APPLICATIONS:
             raise ConfigError('application must be one of {}, got {!r}'
                               .format(', '.join(APPLICATIONS), name))
         application = APPLICATIONS[name]
@@ -81,12 +87,15 @@ def load(config_path: str | Path) -> tuple[Application, Experiment]:
 
 
 def output_dir(config_path: str | Path) -> Path:
-    return RESULTS_DIR / Path(config_path).stem
+    path = Path(config_path)
+    # rerunning the saved results/<name>/config.toml of a run writes to
+    # results/<name>/ again
+    name = path.parent.name if path.name == config.SAVED_CONFIG else path.stem
+    return RESULTS_DIR / name
 
 
-def _solve_and_record(application: Application, cfg: Experiment,
-                      out_dir: Path) -> dict[str, Solution]:
-    model = application.build_model(cfg)
+def _solve_and_record(application: Application, model: OCModel,
+                      cfg: Experiment, out_dir: Path) -> dict[str, Solution]:
     print('NLP: {} variables, {} constraints, {} configurations '
           '({} switches)'.format(model.n_variables, model.n_constraints,
                                  model.n_configs, model.n_switches))
@@ -112,12 +121,9 @@ def _solutions(db: dict[str, Any]) -> dict[str, Solution]:
             if method in db}
 
 
-@contextlib.contextmanager
-def _logged(path: Path) -> Iterator[None]:
-    # progress goes to the terminal and to run.log in the output directory
-    with open(path, 'w') as log, \
-            contextlib.redirect_stdout(_Tee(sys.stdout, log)):
-        yield
+def _teed(stream: Any) -> contextlib.redirect_stdout:
+    # print to the terminal and to stream
+    return contextlib.redirect_stdout(_Tee(sys.stdout, stream))
 
 
 class _Tee(io.TextIOBase):

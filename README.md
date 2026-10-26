@@ -134,8 +134,8 @@ uv sync --extra gurobi       # same, plus the optional Gurobi MILP backend
 
 # transmission lines benchmark (runs from the repo alone)
 uv run gasnetopt run configs/translines_coarse.toml
-uv run gasnetopt present results/translines_coarse     # paper-style figures
-uv run gasnetopt table results/translines_coarse       # Markdown table
+uv run gasnetopt present results/translines_coarse     # figures
+uv run gasnetopt table results/translines_coarse       # markdown table
 
 # gas network (needs GasLib data, see Data below)
 uv run gasnetopt run configs/gaslib11_1h.toml
@@ -146,8 +146,9 @@ An experiment is one TOML file in `configs/`: the application, the methods
 to run after the POC relaxation, and all settings (grid, dwell time,
 tolerances, MILP backend). `run configs/<name>.toml` writes
 `results/<name>/` with a copy of the config, `results.pkl`, `run.log` and
-the figures; `present` and `table` read that directory. To change a
-setting, edit or copy the file.
+the figures; `present` and `table` read that directory, and running its
+saved `config.toml` repeats the run in place. To change a setting, edit or
+copy the file.
 
 Or via Docker (same locked environment):
 

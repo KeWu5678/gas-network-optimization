@@ -65,6 +65,27 @@ def test_topology_draws_gas_networks_only(tiny_config, tmp_path, capsys):
     assert 'no network drawing' in capsys.readouterr().err
 
 
+def test_failed_rerun_keeps_the_previous_run(tiny_config):
+    cli.main(['run', str(tiny_config)])
+    out_dir = experiment.output_dir(tiny_config)
+    before = {path.name: path.read_bytes() for path in out_dir.iterdir()}
+    tiny_config.write_text(TINY.replace('tiny.bcd', 'missing.bcd'))
+    assert cli.main(['run', str(tiny_config)]) == 2
+    assert {path.name: path.read_bytes()
+            for path in out_dir.iterdir()} == before
+
+
+def test_saved_config_reruns_into_its_own_directory(tiny_config):
+    cli.main(['run', str(tiny_config)])
+    saved = experiment.output_dir(tiny_config) / 'config.toml'
+    assert experiment.output_dir(saved) == saved.parent
+    assert cli.main(['run', str(saved)]) == 0
+    assert cli.main(['run', str(saved)]) == 0
+    assert saved.read_text() == TINY
+    assert [path.name for path in experiment.RESULTS_DIR.iterdir()] == [
+        'tiny']
+
+
 def test_invalid_config_exits_with_one_line_error(tiny_config, capsys):
     tiny_config.write_text(TINY.replace('[adm]', '[adm]\nmax_itr = 5'))
     assert cli.main(['run', str(tiny_config)]) == 2

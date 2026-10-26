@@ -82,6 +82,8 @@ def test_invalid_values_are_rejected(tmp_path, adm, message):
     (('methods = ["sur"]', ''), 'missing key methods'),
     (('"sur"', '"sur", "rounding"'), 'unknown method.*rounding'),
     (('"translines"', '"power"'), 'application must be one of'),
+    (('"translines"', '[]'), 'application must be one of'),
+    (('"translines"', '{}'), 'application must be one of'),
     (('extended-tree', 'grid9'), '\\[data\\].*network "grid9"'),
     (('"coarse"', '"medium"'), '\\[model\\].*grid "medium"'),
     (('[milp]', '[milp]\nbackend = "cplex"'), '\\[milp\\].*backend "cplex"'),
@@ -102,4 +104,7 @@ def test_errors_name_the_config_file(tmp_path):
 def test_copy_to_output(tmp_path):
     source = write(tmp_path, TRANSLINES.format(adm=''))
     copied = config.copy_to_output(source, tmp_path / 'run')
+    assert copied.read_text() == source.read_text()
+    # copying the saved config onto itself leaves it in place
+    assert config.copy_to_output(copied, tmp_path / 'run') == copied
     assert copied.read_text() == source.read_text()
