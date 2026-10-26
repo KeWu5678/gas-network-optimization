@@ -12,6 +12,7 @@ Strategies (cf. Göttlich/Hante/Potschka/Schewe, Math. Program. 188 (2021)):
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -20,11 +21,16 @@ from .milp import MilpModel
 CIAP_STRATEGIES = ('SUR', 'MIP', 'SUR+MIP', 'COMB')
 
 
+@dataclass(frozen=True)
+class CiapSolution:
+    beta: np.ndarray                # binary multipliers, one per interval
+    wall_time: float
+
+
 def solve_ciap(t: np.ndarray, alpha: np.ndarray, strategy: str = 'SUR',
                tau_min: float | None = None, backend: str | None = None
-               ) -> tuple[np.ndarray, float]:
-    '''Solve the CIAP for relaxed multipliers alpha on grid t. Returns
-    (beta, wall_time).'''
+               ) -> CiapSolution:
+    'Solve the CIAP for relaxed multipliers alpha on grid t.'
     if strategy not in CIAP_STRATEGIES:
         raise ValueError('Unknown CIAP strategy "{}"'.format(strategy))
     if strategy == 'COMB' and tau_min is None:
@@ -37,11 +43,12 @@ def solve_ciap(t: np.ndarray, alpha: np.ndarray, strategy: str = 'SUR',
         wall_time += time.time() - start
         warm_start = beta
     if strategy != 'SUR':
-        beta, milp_time = ciap_milp(
-            t, alpha, tau_min=tau_min if strategy == 'COMB' else None,
-            warm_start=warm_start, backend=backend)
-        wall_time += milp_time
-    return beta, wall_time
+        milp = ciap_milp(t, alpha,
+                         tau_min=tau_min if strategy == 'COMB' else None,
+                         warm_start=warm_start, backend=backend)
+        beta = milp.beta
+        wall_time += milp.wall_time
+    return CiapSolution(beta, wall_time)
 
 
 def sum_up_rounding(t: np.ndarray, alpha: np.ndarray) -> np.ndarray:
@@ -69,7 +76,7 @@ def sum_up_rounding(t: np.ndarray, alpha: np.ndarray) -> np.ndarray:
 def ciap_milp(t: np.ndarray, alpha: np.ndarray,
               tau_min: float | None = None,
               warm_start: np.ndarray | None = None,
-              backend: str | None = None) -> tuple[np.ndarray, float]:
+              backend: str | None = None) -> CiapSolution:
     N = len(t)
     dt = np.diff(t)
     n_configs = alpha.shape[1]
@@ -91,9 +98,7 @@ def ciap_milp(t: np.ndarray, alpha: np.ndarray,
             coeffs[delta] = 1.
             m.add_constr({**coeffs, eta: -1.}, ub=-acc)      # upper_max
             m.add_constr({**coeffs, eta: +1.}, lb=-acc)      # lower_max
-    for k in range(N - 1):
-        m.add_constr({int(x[k, i]): 1. for i in range(n_configs)},
-                     lb=1., ub=1.)
+    add_sos1_constraints(m, x)
 
     if tau_min is not None:
         add_min_up_constraints(m, x, t, tau_min)
@@ -103,9 +108,16 @@ def ciap_milp(t: np.ndarray, alpha: np.ndarray,
         warm = np.zeros(m.ncols)
         warm[x.reshape(-1)] = warm_start.reshape(-1)
 
-    sol, _, wall_time = m.solve(backend=backend, warm_start=warm)
-    beta = np.round(sol[x.reshape(-1)]).reshape(N - 1, n_configs)
-    return beta, wall_time
+    sol = m.solve(backend=backend, warm_start=warm)
+    beta = np.round(sol.x[x.reshape(-1)]).reshape(N - 1, n_configs)
+    return CiapSolution(beta, sol.wall_time)
+
+
+def add_sos1_constraints(m: MilpModel, x: np.ndarray) -> None:
+    # exactly one configuration active per time step; x (N-1, n_configs)
+    for k in range(x.shape[0]):
+        m.add_constr({int(x[k, i]): 1. for i in range(x.shape[1])},
+                     lb=1., ub=1.)
 
 
 def add_min_up_constraints(m: MilpModel, x: np.ndarray, t: np.ndarray,

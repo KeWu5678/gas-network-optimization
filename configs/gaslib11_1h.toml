@@ -1,6 +1,10 @@
 # GasLib-11 with the TRR154 sinus scenario, 1 h horizon (README benchmark).
-# Run: uv run python examples/run_gaslib11.py configs/gaslib11_1h.toml
+# Run: uv run gasnetopt run configs/gaslib11_1h.toml  ->  results/gaslib11_1h/
 # Paths are relative to the repository root.
+
+application = "gas"
+methods = ["sur", "adm_ciap"]   # after the POC relaxation; any of sur, comb,
+                                # adm, adm_ciap
 
 [data]
 network = "data/gaslib/GasLib-11/GasLib-11-v1-20211130.net"
@@ -33,6 +37,3 @@ feasibility_tol = 1e-6
 
 [milp]
 backend = "highs"         # or "gurobi"
-
-[output]
-dir = "results/gaslib11"

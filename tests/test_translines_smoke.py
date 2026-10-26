@@ -32,8 +32,8 @@ def test_poc_relaxation_solves_on_coarse_grid(coarse_model):
 def test_ocmodel_extract_roundtrip(coarse_model):
     m = coarse_model
     rng = np.random.default_rng(0)
-    alpha = rng.random((m.nt - 1, m.n_configs))
-    u = rng.random((m.nt - 1, m.n_controls))
+    alpha = rng.random((len(m.t) - 1, m.n_configs))
+    u = rng.random((len(m.t) - 1, m.n_controls))
     w = m.with_variables(m.w0, u=u, alpha=alpha)
     alpha2, u2, _ = m.extract(w)
     assert np.allclose(u2, u)
@@ -44,7 +44,8 @@ def test_solution_dict_splits_line_states(coarse_model):
     m = coarse_model
     s = m.solution_dict(np.arange(m.n_variables, dtype=float))
     assert len(s['xi_p']) == len(s['xi_m']) == len(EXTENDED_TREE.edges)
-    assert s['xi_p'][0].shape == (m.nx, m.nt)
+    nt, nx = model.GRIDS['coarse']
+    assert s['xi_p'][0].shape == (nx, nt)
     # xi_m of a line follows its xi_p in the NLP vector
     assert s['xi_m'][0].flatten(order='F')[0] == \
         s['xi_p'][0].flatten(order='F')[-1] + 1

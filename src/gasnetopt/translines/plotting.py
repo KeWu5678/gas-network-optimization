@@ -6,10 +6,8 @@ from pathlib import Path
 import numpy as np
 from matplotlib.figure import Figure
 
+from ..core.pipeline import METHOD_INFO
 from .data import TranslinesNetwork
-
-LEGEND_LABELS = {'poc': 'POC', 'sur': 'SUR', 'comb': 'COMB-CIAP',
-                 'adm': 'ADM', 'adm_ciap': 'ADM + CIAP'}
 
 
 def plot_solution(network: TranslinesNetwork, s: dict, out_dir: Path,
@@ -121,7 +119,8 @@ def _compare_switch_states(solutions: dict[str, dict], ctrl: int) -> Figure:
         t = s['t']
         baseline = 1.1 * (len(solutions) - 1 - i)
         state = _step(s['switch_state'][:, ctrl] + baseline)
-        p = ax.step(t, state, where='post', label=LEGEND_LABELS[method])
+        p = ax.step(t, state, where='post',
+                    label=METHOD_INFO[method].abbreviation)
         ax.fill_between(t, state, y2=baseline, color=p[0].get_color(),
                         step='post', alpha=0.1)
     ax.legend(loc='lower right')
@@ -136,7 +135,8 @@ def _compare_controls(solutions: dict[str, dict], ctrl: int) -> Figure:
     fig = Figure()
     ax = fig.subplots()
     for method, s in solutions.items():
-        ax.step(s['t'], _step(s['u'][:, ctrl]), label=LEGEND_LABELS[method])
+        ax.step(s['t'], _step(s['u'][:, ctrl]),
+                label=METHOD_INFO[method].abbreviation)
     ax.legend(loc='lower center')
     ax.set_xlim(0, s['t'][-1])
     ax.set_xlabel(r'time $t$')
@@ -157,7 +157,7 @@ def _compare_deliveries(network: TranslinesNetwork,
         axes[i].plot(t[:-1], demand[i, :], 'k--', label='demand')
         for method, s in solutions.items():
             axes[i].plot(t, s['xi_p'][line][-1, :],
-                         label=LEGEND_LABELS[method])
+                         label=METHOD_INFO[method].abbreviation)
         if i == 0:
             axes[i].legend(loc='lower center', fontsize=7)
         axes[i].set_xlim(0, t[-1])

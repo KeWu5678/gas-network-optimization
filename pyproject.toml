@@ -12,6 +12,9 @@ dependencies = [
     "matplotlib>=3.7",
 ]
 
+[project.scripts]
+gasnetopt = "gasnetopt.cli:main"
+
 [project.optional-dependencies]
 gurobi = ["gurobipy>=10"]
 
@@ -34,7 +37,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 88
-src = ["src", "tests", "examples"]
+src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]

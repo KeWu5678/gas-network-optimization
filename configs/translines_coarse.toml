@@ -1,7 +1,11 @@
 # Transmission-lines benchmark of the penalty-ADM paper on the coarse grid
 # (README table).
-# Run: uv run python examples/run_translines_adm.py configs/translines_coarse.toml
+# Run: uv run gasnetopt run configs/translines_coarse.toml
+#      ->  results/translines_coarse/
 # Paths are relative to the repository root.
+
+application = "translines"
+methods = ["sur", "comb", "adm", "adm_ciap"]   # after the POC relaxation
 
 [data]
 network = "extended-tree"   # built-in network; "subgrid" needs user-supplied
@@ -29,6 +33,3 @@ feasibility_tol = 1e-6
 
 [milp]
 backend = "highs"           # or "gurobi"
-
-[output]
-dir = "results/translines"

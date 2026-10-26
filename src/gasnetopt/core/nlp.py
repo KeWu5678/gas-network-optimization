@@ -76,7 +76,7 @@ class NlpProblem:
 
 class NlpSolver:
 
-    def __init__(self, problem: NlpProblem, tol: float = 1e-13,
+    def __init__(self, problem: NlpProblem, tol: float,
                  max_wall_time: float | None = None) -> None:
         ipopt: dict = {'tol': tol, 'print_level': 0}
         if max_wall_time is not None:

@@ -382,21 +382,34 @@ def _pipe_profile(edge: ET.Element
     return np.array(xs), np.array(qs), np.array(ps)
 
 
+class InvalidDataError(ValueError):
+
+    def __init__(self, findings: List[str]) -> None:
+        super().__init__('invalid input data:\n  ' + '\n  '.join(findings))
+        self.findings = findings
+
+
 def validate(net: GasNetwork,
-             bc: Optional[BoundaryConditions] = None) -> List[str]:
+             bc: Optional[BoundaryConditions] = None) -> None:
     '''Pre-flight data validation: diagnose the data failures that would
     otherwise surface as solver errors deep inside a solve (0*inf = NaN in
     the NLP, KeyError at model build, Ipopt restoration failure on
-    infeasible demand). Returns a list of human-readable findings; an empty
-    list means the data passed all checks.'''
-    findings = (missing_big_m_bounds(net) + _unknown_endpoints(net)
+    infeasible demand). Raises InvalidDataError with all findings.'''
+    findings = (_missing_big_m_bounds(net) + _unknown_endpoints(net)
                 + _unreachable_nodes(net))
     if bc is not None:
         findings += _boundary_data_findings(net, bc)
-    return findings
+    if findings:
+        raise InvalidDataError(findings)
 
 
-def missing_big_m_bounds(net: GasNetwork) -> List[str]:
+def validate_big_m_bounds(net: GasNetwork) -> None:
+    findings = _missing_big_m_bounds(net)
+    if findings:
+        raise InvalidDataError(findings)
+
+
+def _missing_big_m_bounds(net: GasNetwork) -> List[str]:
     findings = []
     for valve in net.valves:
         if not np.isfinite(valve.flow_max):
