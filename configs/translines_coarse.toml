@@ -1,0 +1,34 @@
+# Transmission-lines benchmark of the penalty-ADM paper on the coarse grid
+# (README table).
+# Run: uv run python examples/run_translines_adm.py configs/translines_coarse.toml
+# Paths are relative to the repository root.
+
+[data]
+network = "extended-tree"   # built-in network; "subgrid" needs user-supplied
+                            # demand data
+demand = "data/translines/demand_extended_tree_coarse.dat"
+
+[model]
+grid = "coarse"             # dt = dx = 0.5; "fine": dt = dx = 0.25 (with
+                            # data/translines/demand_extended_tree.dat)
+
+[switching]
+tau_min = 1.0               # minimal dwell time [model time units]
+
+[nlp]
+tol = 1e-8                  # POC relaxation and SUR/COMB reoptimization
+
+[adm]
+max_iter = 100              # ADM iterations per penalty weight
+epsilon = 1e-4              # termination, relative to |Psi_POC|
+nlp_tol = 1e-8
+convergence_tol = 1e-4
+feasibility_tol = 1e-6
+# time_budget = 600.0       # wall clock [s]
+# rho_values = [1e-3, 1e-1, 1e1]   # default: scaled to Psi_POC
+
+[milp]
+backend = "highs"           # or "gurobi"
+
+[output]
+dir = "results/translines"

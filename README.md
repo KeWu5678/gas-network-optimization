@@ -2,38 +2,22 @@
 
 [![CI](https://github.com/KeWu5678/gas-network-optimization/actions/workflows/ci.yml/badge.svg)](https://github.com/KeWu5678/gas-network-optimization/actions/workflows/ci.yml)
 
-**Switching decisions with minimum dwell times on top of networked
-dynamical systems.** Valves, compressor stations, or transmission lines are
-switched on/off over time while a hyperbolic PDE network (gas flow,
-telegraph equations) evolves underneath — and every switch must respect a
-minimum up/down time, the same combinatorial structure as unit-commitment
-scheduling. The package implements the decomposition algorithms of two
-papers ([references](#references)):
+In a hyperbolic PDE network (gas network, 
+electricity network), controls (valves, compressor stations, transmission lines) are
+switched on/off over time — and every switch must not be activated too frequently, 
+otherwise the network suffers from **chattering**. 
+The proposed algorithm minimizes the chattering while perserves the optimality. 
 
+## The problem class
 
-- **transient gas networks** (semilinear isothermal Euler equations) on
+Minimize demand-tracking error over a horizon subject to **the gas networks** (semilinear isothermal Euler equations) on
   [GasLib](https://gaslib.zib.de) instances with
   [TRR154 transient data](https://www.trr154.fau.de/transient-data/).
 
 ![GasLib-11 network topology](assets/gaslib11_topology.png)
 
-## The problem class
-
-Minimize demand-tracking error over a horizon subject to
-
-- **network dynamics**: 2×2 hyperbolic systems per edge (mass flow and
-  pressure in characteristic variables), coupled at nodes by conservation
-  laws — discretized by first-order upwind with implicit stiff friction
-  (IMEX) under a CFL condition;
-- **continuous controls**: boundary pressures / injections, compressor
-  pressure increase;
-- **binary controls**: the on/off state of each switchable element, with
-  **minimum dwell-time constraints** that couple decisions across time and
-  make the problem a mixed-integer optimal control problem (MIOCP) that
-  direct MINLP solvers cannot crack at practical grid sizes.
 
 ## Method: relax → round → repair, coordinated by a penalty ADM
-
 1. **Partial outer convexification (POC)** replaces the binary choice among
    the 2^s network configurations by convex multipliers α(t) with an SOS1
    constraint — a smooth NLP (CasADi/IPOPT). Its solution is fractional
@@ -65,7 +49,7 @@ Two robustness measures beyond the paper (both documented in
 |---|---|
 | NLP (POC relaxation, reoptimization) | CasADi + IPOPT, sparse AD |
 | MILP (CIAP, COMB, tCOMB) | solver-agnostic layer: HiGHS (default, via `scipy.optimize.milp`) or Gurobi (`gasnetopt[gurobi]`, warm starts) |
-| model interface | typed `OCModel` — algorithms interact with any model only through `extract` / `overwrite` / `evaluate_objective` / grid `t` / encoding `r` |
+| model interface | typed `OCModel` — algorithms interact with any model only through `extract` / `bounds` / `parameters` / `evaluate_objective` / grid `t` / encoding `r`; IPOPT behind one adapter (`nlp.py`: return status, wall time, exceptions) |
 
 ## Results
 
@@ -79,7 +63,7 @@ Two robustness measures beyond the paper (both documented in
 | penalty ADM | 15.082 | 6 | yes |
 | penalty ADM + CIAP | **15.077** | 9 | yes |
 
-(regenerate with `examples/make_results_table.py`; seconds on a laptop)
+(regenerate with `examples/make_results_table.py`)
 
 SUR chatters — 31 switches, infeasible for any real dwell requirement. The
 ADM variants deliver the best objectives **and** dwell-feasibility, within
@@ -105,41 +89,39 @@ convention: terminal blocks are exempt from the min-up check, as in
 real-world transient gas control models.) Measured performance caveat:
 on the finer 2 h grid (Δt = 60 s, 960 binaries per projection MILP) the
 tCOMB solves exceed 1.5 h total on HiGHS — that grid needs the Gurobi
-backend (`--milp-backend gurobi`) or a `time_budget`.
+backend (`backend = "gurobi"` under `[milp]` in the config) or an
+`[adm] time_budget`.
 
-## Engineering
-
-The optimizer is built to *propose a schedule under operational
-constraints*, borrowing the structural signatures of production grid
-optimization:
-
-- **Data validation as its own layer**: `gaslib_io.validate(net, bc)`
-  diagnoses dirty data by name (missing bounds that would poison the NLP
-  with 0·∞ = NaN, sinks without boundary data, disconnected nodes, demand
-  exceeding supply capacity) before any solver runs.
-- **Determinism**: single-threaded solver settings, seeded tests, locked
-  dependencies (`uv.lock`), and a Docker image (pinned base images) that
-  reproduces the experiments in the locked environment.
 
 
 ## Repository layout
 
 ```
+configs/             experiment settings (TOML), one file per benchmark
 data/
-  translines/        demand profiles (tracked; the only data needed for CI)
+  translines/        demand profiles (tracked)
   gaslib/            GasLib-11/-40 + TRR154 .bcd/.state (local, see Data)
 docs/
   gas-network-design.md   model derivation & design decisions
   references/             papers (local, not redistributed)
-examples/            runnable scripts: benchmarks, figures, results table
+examples/            thin entry scripts: config -> <application>.experiment
 src/gasnetopt/
-  collocation.py     OCModel base (typed interface), collocation utilities
-  milp.py            solver-agnostic MILP layer (HiGHS/Gurobi, time limits)
-  ciap.py            sum-up rounding, CIAP-MILP, dwell-time COMB
-  adm.py             penalty ADM, tCOMB projection, time-budget fallback
-  gas/               GasLib/TRR154 parsers + validation, ISO2 gas model
-  translines/        telegraph-equation benchmark
-tests/               pytest suite incl. synthetic gas fixture
+  core/              shared layer, knows no application
+    ocmodel.py       OCModel: the interface both models implement
+    pipeline.py      POC, then the requested methods, one Solution each
+    adm.py           POC, rounding + reoptimization, penalty ADM, tCOMB,
+                     time-budget fallback
+    ciap.py          sum-up rounding, CIAP-MILP, dwell-time COMB
+    nlp.py           CasADi/IPOPT boundary: NLP builder, solver adapter
+    milp.py          solver-agnostic MILP layer (HiGHS/Gurobi, time limits)
+  config.py          strict TOML loader + the sections all experiments share
+  results_io.py      results.pkl next to the config of a run
+  gas/               transient gas networks (GasLib / TRR154)
+    data.py          .net/.bcd/.state parsers + validation
+    model.py         ISO2 gas NLP, GasOCModel
+    experiment.py    experiment schema, run
+    plotting.py      solution and network figures
+  translines/        telegraph-equation benchmark, same four modules
 ```
 
 ## Quickstart
@@ -148,26 +130,28 @@ Requires [uv](https://docs.astral.sh/uv/):
 
 ```sh
 uv sync                      # locked environment (casadi/ipopt, numpy, scipy)
-uv run pytest                # 25 tests; gas benchmark tests skip without data
 
 # transmission lines: POC + SUR (runs from the repo alone)
 uv run python examples/run_translines.py
 
 # full method benchmark + paper-style figures + results table
-uv run python examples/run_translines_adm.py --net "extended tree" --coarse
-uv run python examples/make_results_table.py \
-    results/translines/translines_extended_tree_results
+uv run python examples/run_translines_adm.py configs/translines_coarse.toml
+uv run python examples/present_translines_results.py results/translines
+uv run python examples/make_results_table.py results/translines
 
 # gas network (needs GasLib data, see Data below)
-uv run python examples/run_gaslib11.py \
-    --horizon 3600 --nt 61 --tau-min 900
+uv run python examples/run_gaslib11.py configs/gaslib11_1h.toml
 ```
+
+Each run reads all of its settings (grid, dwell time, tolerances, MILP
+backend, output directory) from one TOML file in `configs/` and writes
+`config.toml`, `results.pkl` and its figures to the output directory. To
+change a setting, edit or copy the file; `--methods` picks the methods.
 
 Or via Docker (same locked environment):
 
 ```sh
 docker build -t gasnetopt .
-docker run --rm gasnetopt                       # test suite
 docker run --rm -v "$PWD/results:/app/results" gasnetopt \
     uv run python examples/run_translines.py
 ```
@@ -178,18 +162,8 @@ The transmission-lines demand profiles ship with the repository. GasLib
 networks (CC-BY 3.0) and TRR154 transient data are **not redistributed**:
 download [GasLib-11](https://gaslib.zib.de) and the matching
 [TRR154 `.bcd`](https://www.trr154.fau.de/transient-data/) into
-`data/gaslib/GasLib-11/` (paths in `examples/run_gaslib11.py`). CI covers
-the gas code path with the synthetic fixture in `tests/fixtures/` instead.
+`data/gaslib/GasLib-11/` (paths in `configs/gaslib11_1h.toml`).
 
-## Limitations & extensions
-
-- Deterministic demand; scenario-based (stochastic) demand is the natural
-  extension of the tracking objective.
-- Dwell times act per network configuration — by design, matching the
-  methodology and real-world operation-mode switching; the analysis and
-  literature trail is in `docs/gas-network-design.md`.
-- GasLib-40 (64 configurations) parses and builds; scaling the ADM there
-  needs a sparse switch encoding instead of full enumeration.
 
 ## References
 

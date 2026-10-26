@@ -1,14 +1,14 @@
 import numpy as np
 import pytest
 
-from gasnetopt.adm import TComb
-from gasnetopt.ciap import solve_ciap, sum_up_rounding
+from gasnetopt.core.adm import TComb
+from gasnetopt.core.ciap import solve_ciap, sum_up_rounding
 
 
 def accumulated_deviation(t, alpha, beta):
     '''eta(beta) = min_delta max_{i,k} |delta + sum_{k''<k} dt (alpha-beta)|,
     the centered deviation the CIAP MILP minimizes (free offset delta shared
-    over all modes; k = 0 contributes an empty sum, i.e. 0).'''
+    over all configurations; k = 0 contributes an empty sum, i.e. 0).'''
     dt = np.diff(t)[:, None]
     acc = np.cumsum(dt * (alpha - beta), axis=0)
     lo = min(acc.min(), 0.)
@@ -19,9 +19,9 @@ def accumulated_deviation(t, alpha, beta):
 @pytest.fixture
 def relaxed_instance():
     rng = np.random.default_rng(42)
-    N, modes = 9, 3
+    N, n_configs = 9, 3
     t = np.linspace(0., 4., N)
-    alpha = rng.random((N - 1, modes))
+    alpha = rng.random((N - 1, n_configs))
     alpha /= alpha.sum(axis=1, keepdims=True)
     return t, alpha
 
@@ -69,13 +69,13 @@ def test_comb_respects_dwell_time(relaxed_instance):
 
 
 def test_tcomb_returns_feasible_input_unchanged():
-    N, modes = 9, 3
+    N, n_configs = 9, 3
     t = np.linspace(0., 4., N)
-    r = np.eye(modes)
+    r = np.eye(n_configs)
     # piecewise constant with long plateaus -> feasible for tau_min = 1.0
-    v = np.zeros((N - 1, modes))
+    v = np.zeros((N - 1, n_configs))
     v[:4, 0] = 1.
     v[4:, 2] = 1.
-    v_proj, obj_val, _ = TComb(t, modes, tau_min=1.0).solve(v, r)
+    v_proj, distance, _ = TComb(t, r, tau_min=1.0).project(v)
     assert np.allclose(v_proj, v)
-    assert obj_val <= 1e-9
+    assert distance <= 1e-9
